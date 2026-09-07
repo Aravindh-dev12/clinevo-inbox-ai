@@ -26,6 +26,14 @@ public class OperationalMetrics {
                 .description("Largest persisted message processing duration in milliseconds").register(registry);
         Gauge.builder("clinevo.processing.retries.total", jdbc, template -> count(template, "SELECT COUNT(*) FROM AUDIT_EVENT WHERE EVENT_TYPE='AI_PROCESSING_RETRY'"))
                 .description("Persisted retry audit events").register(registry);
+        Gauge.builder("clinevo.attachments.scan.pending", jdbc, template -> count(template, "SELECT COUNT(*) FROM ATTACHMENT WHERE MALWARE_SCAN_STATUS='PENDING'"))
+                .description("Attachments still waiting for a malware decision").register(registry);
+        Gauge.builder("clinevo.attachments.quarantined", jdbc, template -> count(template, "SELECT COUNT(*) FROM ATTACHMENT WHERE PROCESSING_STATUS='QUARANTINED_MALWARE'"))
+                .description("Attachments quarantined after malware detection").register(registry);
+        Gauge.builder("clinevo.attachments.storage.external", jdbc, template -> count(template, "SELECT COUNT(*) FROM ATTACHMENT WHERE STORAGE_PROVIDER='FILESYSTEM' AND PURGED_AT IS NULL"))
+                .description("Attachment objects currently retained in external immutable storage").register(registry);
+        Gauge.builder("clinevo.attachments.purged.total", jdbc, template -> count(template, "SELECT COUNT(*) FROM AUDIT_EVENT WHERE EVENT_TYPE='ATTACHMENT_CONTENT_PURGED'"))
+                .description("Audited attachment-content purge events").register(registry);
     }
 
     public void recordReview(String action, long elapsedMs) {

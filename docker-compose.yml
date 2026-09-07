@@ -14,6 +14,18 @@ services:
       retries: 20
       start_period: 30s
 
+  clamav:
+    image: clamav/clamav:stable
+    volumes: ["clamav-db:/var/lib/clamav"]
+    expose: ["3310"]
+    restart: unless-stopped
+
+  document-store-init:
+    image: alpine:3.20
+    command: ["sh", "-c", "mkdir -p /data/originals /data/quarantine && chown -R 10001:10001 /data && chmod 0750 /data /data/originals /data/quarantine"]
+    volumes: ["document-store:/data"]
+    restart: "no"
+
   ai-service:
     build: ./ai-service
     environment:
@@ -58,9 +70,23 @@ services:
       JOB_BATCH_SIZE: ${JOB_BATCH_SIZE:-4}
       JOB_RETRY_BASE_SECONDS: ${JOB_RETRY_BASE_SECONDS:-5}
       JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-300}
+      MALWARE_SCAN_ENABLED: ${MALWARE_SCAN_ENABLED:-true}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
+      CLAMAV_CONNECT_TIMEOUT_MS: ${CLAMAV_CONNECT_TIMEOUT_MS:-3000}
+      CLAMAV_READ_TIMEOUT_MS: ${CLAMAV_READ_TIMEOUT_MS:-30000}
+      CLAMAV_CHUNK_BYTES: ${CLAMAV_CHUNK_BYTES:-8192}
+      DOCUMENT_STORAGE_MODE: ${DOCUMENT_STORAGE_MODE:-filesystem}
+      DOCUMENT_STORAGE_ROOT: /var/lib/clinevo/documents
+      DOCUMENT_RETENTION_DAYS: ${DOCUMENT_RETENTION_DAYS:-0}
+      DOCUMENT_PURGE_POLL_MS: ${DOCUMENT_PURGE_POLL_MS:-3600000}
+      DOCUMENT_PURGE_BATCH_SIZE: ${DOCUMENT_PURGE_BATCH_SIZE:-50}
+    volumes: ["document-store:/var/lib/clinevo/documents"]
     depends_on:
       oracle: { condition: service_healthy }
       ai-service: { condition: service_healthy }
+      clamav: { condition: service_started }
+      document-store-init: { condition: service_completed_successfully }
     ports: ["8080:8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
@@ -77,3 +103,5 @@ services:
 
 volumes:
   oracle-data:
+  clamav-db:
+  document-store:

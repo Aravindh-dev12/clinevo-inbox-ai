@@ -25,13 +25,15 @@ class AiProcessingServiceDurabilityTest {
     @Autowired JdbcTemplate jdbc;
 
     @Test
-    void enqueueStagesAttachmentBytesAndDurableJob() {
+    void enqueueStagesAttachmentBytesBehindMalwareGateAndDurableJob() {
         InboxMessage message = fixture();
         byte[] pdf = "%PDF-1.7\nsynthetic".getBytes(StandardCharsets.US_ASCII);
         service.enqueue(message.getId(), List.of(new MailAttachment("../unsafe/case.pdf", "application/pdf", pdf)));
 
         assertThat(jdbc.queryForObject("SELECT STATUS FROM PROCESSING_JOB WHERE MESSAGE_ID=?", String.class, message.getId())).isEqualTo("QUEUED");
-        assertThat(jdbc.queryForObject("SELECT PROCESSING_STATUS FROM ATTACHMENT WHERE MESSAGE_ID=?", String.class, message.getId())).isEqualTo("STAGED");
+        assertThat(jdbc.queryForObject("SELECT PROCESSING_STATUS FROM ATTACHMENT WHERE MESSAGE_ID=?", String.class, message.getId())).isEqualTo("SCAN_PENDING");
+        assertThat(jdbc.queryForObject("SELECT MALWARE_SCAN_STATUS FROM ATTACHMENT WHERE MESSAGE_ID=?", String.class, message.getId())).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT STORAGE_PROVIDER FROM ATTACHMENT WHERE MESSAGE_ID=?", String.class, message.getId())).isEqualTo("DATABASE_STAGING");
         assertThat(jdbc.queryForObject("SELECT FILE_NAME FROM ATTACHMENT WHERE MESSAGE_ID=?", String.class, message.getId())).isEqualTo("case.pdf");
         assertThat(jdbc.queryForObject("SELECT CONTENT_BLOB FROM ATTACHMENT WHERE MESSAGE_ID=?", byte[].class, message.getId())).containsExactly(pdf);
     }
@@ -41,7 +43,9 @@ class AiProcessingServiceDurabilityTest {
         InboxMessage message = fixture();
         service.enqueue(message.getId(), List.of(new MailAttachment("fake.pdf", "application/pdf", "not-pdf".getBytes(StandardCharsets.UTF_8))));
         assertThat(jdbc.queryForObject("SELECT PROCESSING_STATUS FROM ATTACHMENT WHERE MESSAGE_ID=?", String.class, message.getId())).isEqualTo("REJECTED_INVALID_PDF");
+        assertThat(jdbc.queryForObject("SELECT MALWARE_SCAN_STATUS FROM ATTACHMENT WHERE MESSAGE_ID=?", String.class, message.getId())).isEqualTo("NOT_REQUIRED");
         assertThat(jdbc.queryForObject("SELECT REJECTION_REASON FROM ATTACHMENT WHERE MESSAGE_ID=?", String.class, message.getId())).contains("PDF signature");
+        assertThat(jdbc.queryForObject("SELECT CONTENT_BLOB FROM ATTACHMENT WHERE MESSAGE_ID=?", byte[].class, message.getId())).isNull();
     }
 
     @Test
