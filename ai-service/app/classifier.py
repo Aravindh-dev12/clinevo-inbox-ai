@@ -1,119 +1,231 @@
 from __future__ import annotations
 
 import re
+import unicodedata
+from dataclasses import dataclass
+
 from .models import Classification, ExtractedValue, SourceRef
 
-PQC_TERMS = {
+PQC_TERMS = (
     "broken seal", "wrong color", "wrong colour", "contamination", "contaminated",
-    "damaged packaging", "counterfeit", "cracked", "leaking", "defect", "defective",
-}
-REACTION_TERMS = {
-    "rash", "nausea", "vomiting", "dizziness", "headache", "hospitalized", "hospitalised",
-    "anaphylaxis", "reaction", "adverse", "swelling", "fever", "death", "life-threatening",
-}
-PRODUCT_TERMS = {"drug", "medicine", "tablet", "capsule", "dose", "product", "mg"}
-REPORTER_TERMS = {"doctor", "physician", "nurse", "patient", "caregiver", "pharmacist", "reported", "reporter"}
-MI_TERMS = {"dose", "dosing", "how to take", "interaction", "can i", "should i", "what is", "how often"}
+    "damaged packaging", "counterfeit", "cracked", "leaking", "leaked", "defect", "defective",
+    "sello roto", "color incorrecto", "emballage endommagé", "fissuré",
+)
+REACTION_TERMS = (
+    "anaphylaxis", "life-threatening", "hospitalized", "hospitalised", "hospitalization",
+    "rash", "nausea", "vomiting", "dizziness", "headache", "swelling", "fever", "death",
+    "erupción", "picor", "mareo", "vómitos", "douleur", "gonflement",
+)
+REPORTER_TERMS = (
+    "doctor", "physician", "nurse", "patient", "caregiver", "pharmacist", "reported", "reporter",
+    "médico", "medico", "enfermera", "paciente", "farmacéutico", "pharmacien", "médecin", "patient",
+)
+MI_TERMS = (
+    "dose", "dosing", "how to take", "interaction", "can i", "should i", "what is", "how often",
+    "puede", "dosis", "interacción", "interaction", "peut-il", "comment prendre",
+)
+NEGATION_WORDS = ("no", "not", "without", "denies", "denied", "aucun", "aucune", "sans", "sin", "ningún", "ninguna")
+ROUTE_TERMS = ("oral", "orally", "intravenous", "iv", "subcutaneous", "intramuscular", "topical", "por vía oral")
+COUNTRIES = (
+    "India", "United Kingdom", "UK", "Canada", "Australia", "Ireland", "Singapore", "Spain",
+    "New Zealand", "France", "España", "France",
+)
 
 
-def _contains_any(text: str, terms: set[str]) -> bool:
-    return any(term in text for term in terms)
+@dataclass(frozen=True)
+class Located:
+    value: str
+    page: int
+    evidence: str
+
+
+def _fold(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
+
+
+def _context(text: str, start: int, end: int, radius: int = 55) -> str:
+    left = max(0, start - radius)
+    right = min(len(text), end + radius)
+    return " ".join(text[left:right].split())
+
+
+def _is_negated(text: str, start: int) -> bool:
+    prefix = _fold(text[max(0, start - 35):start])
+    return bool(re.search(r"\b(?:" + "|".join(re.escape(_fold(x)) for x in NEGATION_WORDS) + r")\b(?:\W+\w+){0,3}\W*$", prefix))
+
+
+def _nonnegated_terms(text: str, terms: tuple[str, ...]) -> list[str]:
+    folded = _fold(text)
+    hits: list[str] = []
+    for term in terms:
+        folded_term = _fold(term)
+        for match in re.finditer(re.escape(folded_term), folded):
+            if not _is_negated(folded, match.start()):
+                hits.append(term)
+                break
+    return hits
+
+
+def _product_name(text: str) -> str | None:
+    patterns = (
+        r"\b(?:product|drug|medicine|medication|producto|produit)\s*[:\-]?\s*([A-Z][A-Za-z0-9\-]{2,})\b",
+        r"\b([A-Z][A-Za-z0-9\-]{2,})\s+\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
+    return None
 
 
 def classify(text: str) -> list[Classification]:
-    normalized = " ".join(text.lower().split())
+    normalized = " ".join(text.split())
+    folded = _fold(normalized)
     labels: list[Classification] = []
 
-    patient_present = bool(re.search(r"\b(patient|male|female|\d{1,3}\s*(?:year|yr)s?\s*old)\b", normalized))
-    reporter_present = _contains_any(normalized, REPORTER_TERMS)
-    product_present = _contains_any(normalized, PRODUCT_TERMS)
-    reaction_present = _contains_any(normalized, REACTION_TERMS)
+    patient_present = bool(re.search(r"\b(?:patient|paciente|male|female|mujer|hombre|woman|man|\d{1,3}\s*[- ]?year[- ]?old|age\s*[:\-]?\s*\d{1,3})\b", folded))
+    reporter_present = any(_fold(term) in folded for term in REPORTER_TERMS)
+    product_present = _product_name(normalized) is not None
+    reaction_hits = _nonnegated_terms(normalized, REACTION_TERMS)
 
-    if patient_present and reporter_present and product_present and reaction_present:
+    if patient_present and reporter_present and product_present and reaction_hits:
         labels.append(Classification(
             category="ICSR",
-            confidence=0.90,
-            reason="Patient, reporter, product and adverse outcome indicators are all present.",
+            confidence=0.92,
+            reason="Specific patient, reporter, product and non-negated adverse outcome indicators are present.",
         ))
 
-    pqc_hits = [term for term in PQC_TERMS if term in normalized]
+    pqc_hits = _nonnegated_terms(normalized, PQC_TERMS)
     if pqc_hits:
         labels.append(Classification(
             category="PQC",
-            confidence=min(0.98, 0.72 + 0.05 * len(pqc_hits)),
-            reason=f"Product-quality terms detected: {', '.join(sorted(pqc_hits)[:4])}.",
+            confidence=min(0.98, 0.76 + 0.04 * len(pqc_hits)),
+            reason=f"Non-negated product-quality indicators detected: {', '.join(pqc_hits[:4])}.",
         ))
 
-    question_like = "?" in text or _contains_any(normalized, MI_TERMS)
-    if question_like and not reaction_present and not pqc_hits:
+    question_like = "?" in normalized or any(_fold(term) in folded for term in MI_TERMS)
+    if question_like and not reaction_hits and not pqc_hits:
         labels.append(Classification(
             category="MI",
-            confidence=0.86,
-            reason="The content asks a product/dosing question without an adverse reaction or product defect.",
+            confidence=0.88,
+            reason="The content asks a product/dosing question without a supported adverse reaction or product defect.",
         ))
 
     if not labels:
         labels.append(Classification(
             category="NOT_RELEVANT",
-            confidence=0.82,
-            reason="No sufficient safety-report, quality-complaint, or medical-information indicators were found.",
+            confidence=0.84,
+            reason="The four ICSR elements are incomplete and no supported PQC or MI pattern is present.",
         ))
 
     return labels
 
 
-def _value(value: str | None, confidence: float, source_name: str, page: int, evidence: str | None = None) -> ExtractedValue:
-    if not value:
-        return ExtractedValue(value="Not stated", confidence=0.0, source=None)
+def _unknown() -> ExtractedValue:
+    return ExtractedValue(value="Not stated", confidence=0.0, source=None)
+
+
+def _value(located: Located | None, confidence: float, source_name: str, *, source_type: str = "PDF") -> ExtractedValue:
+    if located is None:
+        return _unknown()
     return ExtractedValue(
-        value=value.strip(),
+        value=located.value.strip(),
         confidence=confidence,
-        source=SourceRef(source_type="PDF", source_name=source_name, page=page, evidence=evidence),
+        source=SourceRef(source_type=source_type, source_name=source_name, page=located.page if source_type == "PDF" else None, evidence=located.evidence),
     )
 
 
-def extract_safety_facts(text: str, source_name: str, page: int = 1) -> dict[str, dict[str, ExtractedValue]]:
-    age = re.search(r"\b(\d{1,3})\s*(?:year|yr)s?\s*old\b", text, re.I)
-    sex = re.search(r"\b(male|female)\b", text, re.I)
-    dose = re.search(r"\b(\d+(?:\.\d+)?)\s*(mg|mcg|g|ml)\b", text, re.I)
-    lot = re.search(r"\b(?:lot|batch)\s*(?:number|no\.?|#)?\s*[:\-]?\s*([A-Z0-9\-]+)\b", text, re.I)
+def _regex(pages: list[str], pattern: str, group: int = 1, flags: int = re.I) -> Located | None:
+    for page_number, text in enumerate(pages, start=1):
+        match = re.search(pattern, text, flags)
+        if match:
+            return Located(match.group(group), page_number, _context(text, match.start(), match.end()))
+    return None
 
-    reaction = next((term for term in REACTION_TERMS if term in text.lower()), None)
-    pqc = next((term for term in PQC_TERMS if term in text.lower()), None)
+
+def _term(pages: list[str], terms: tuple[str, ...], *, value_map: dict[str, str] | None = None) -> Located | None:
+    for page_number, text in enumerate(pages, start=1):
+        folded = _fold(text)
+        for term in terms:
+            target = _fold(term)
+            for match in re.finditer(re.escape(target), folded):
+                if _is_negated(folded, match.start()):
+                    continue
+                value = value_map.get(term, term) if value_map else term
+                return Located(value, page_number, _context(text, match.start(), match.end()))
+    return None
+
+
+def _product(pages: list[str]) -> Located | None:
+    patterns = (
+        r"\b(?:Product|Drug|Medicine|Medication|Producto|Produit)\s*[:\-]?\s*([A-Z][A-Za-z0-9\-]{2,})\b",
+        r"\b([A-Z][A-Za-z0-9\-]{2,})\s+\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b",
+    )
+    for pattern in patterns:
+        found = _regex(pages, pattern)
+        if found:
+            return found
+    return None
+
+
+def _question(pages: list[str]) -> Located | None:
+    for page_number, text in enumerate(pages, start=1):
+        for match in re.finditer(r"([^\n.!?]{8,}\?)", text):
+            return Located(match.group(1).strip(), page_number, _context(text, match.start(), match.end()))
+    return None
+
+
+def extract_facts(pages: list[str], source_name: str) -> dict[str, dict[str, ExtractedValue]]:
+    age = _regex(pages, r"\b(\d{1,3})\s*[- ]?year[- ]?old\b") or _regex(pages, r"\bage\s*[:\-]?\s*(\d{1,3})\b")
+    sex = _term(pages, ("female", "male", "woman", "man", "mujer", "hombre"), value_map={"woman":"female","mujer":"female","man":"male","hombre":"male"})
+    weight = _regex(pages, r"\b(\d{2,3}\s*kg)\b")
+    reporter = _term(pages, REPORTER_TERMS)
+    country = _term(pages, COUNTRIES)
+    product = _product(pages)
+    dose = _regex(pages, r"\b(\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml))\b")
+    route = _term(pages, ROUTE_TERMS)
+    start_date = _regex(pages, r"\b(?:started?|start date)\s*[:\-]?\s*(\d{1,2}[-/][A-Za-z]{3}[-/]\d{4}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b")
+    lot = _regex(pages, r"\b(?:lot|batch)\s*(?:number|no\.?|#)?\s*[:\-]?\s*([A-Z0-9\-]+)\b")
+    reaction = _term(pages, REACTION_TERMS)
+    outcome = _term(pages, ("recovered", "resolved", "recovering", "fatal", "unknown"))
+    seriousness = _term(pages, ("death", "life-threatening", "hospitalized", "hospitalised", "hospitalization"))
+    pqc_issue = _term(pages, PQC_TERMS)
+    photo = _term(pages, ("photo", "image", "photograph"), value_map={"photo":"yes","image":"yes","photograph":"yes"})
+    question = _question(pages)
 
     return {
         "patient": {
-            "age": _value(age.group(1) if age else None, 0.95, source_name, page, age.group(0) if age else None),
-            "sex": _value(sex.group(1).lower() if sex else None, 0.92, source_name, page, sex.group(0) if sex else None),
-            "weight_height": _value(None, 0.0, source_name, page),
-            "relevant_history": _value(None, 0.0, source_name, page),
+            "age": _value(age, 0.97, source_name),
+            "sex": _value(sex, 0.94, source_name),
+            "weight_height": _value(weight, 0.93, source_name),
+            "relevant_history": _unknown(),
         },
         "reporter": {
-            "identity_role": _value(next((r for r in REPORTER_TERMS if r in text.lower()), None), 0.65, source_name, page),
-            "country": _value(None, 0.0, source_name, page),
+            "identity_role": _value(reporter, 0.78, source_name),
+            "country": _value(country, 0.90, source_name),
         },
         "product": {
-            "name": _value(None, 0.0, source_name, page),
-            "dose": _value(" ".join(dose.groups()) if dose else None, 0.94, source_name, page, dose.group(0) if dose else None),
-            "route": _value(None, 0.0, source_name, page),
-            "start_stop_dates": _value(None, 0.0, source_name, page),
-            "batch_lot": _value(lot.group(1) if lot else None, 0.90, source_name, page, lot.group(0) if lot else None),
+            "name": _value(product, 0.95, source_name),
+            "dose": _value(dose, 0.96, source_name),
+            "route": _value(route, 0.90, source_name),
+            "start_stop_dates": _value(start_date, 0.88, source_name),
+            "batch_lot": _value(lot, 0.94, source_name),
         },
         "reaction": {
-            "event": _value(reaction, 0.72 if reaction else 0.0, source_name, page),
-            "onset": _value(None, 0.0, source_name, page),
-            "outcome": _value(None, 0.0, source_name, page),
+            "event": _value(reaction, 0.88, source_name),
+            "onset": _unknown(),
+            "outcome": _value(outcome, 0.86, source_name),
         },
         "severity": {
-            "seriousness": _value(
-                next((term for term in ["death", "hospitalized", "hospitalised", "life-threatening"] if term in text.lower()), None),
-                0.90,
-                source_name,
-                page,
-            )
+            "seriousness": _value(seriousness, 0.94, source_name),
         },
         "quality_complaint": {
-            "issue": _value(pqc, 0.80 if pqc else 0.0, source_name, page),
-            "photo_mentioned": _value("yes" if "photo" in text.lower() or "image" in text.lower() else None, 0.75, source_name, page),
+            "issue": _value(pqc_issue, 0.90, source_name),
+            "photo_mentioned": _value(photo, 0.85, source_name),
+        },
+        "medical_information": {
+            "question": _value(question, 0.94, source_name),
+            "product_topic": _value(product, 0.90, source_name),
         },
     }

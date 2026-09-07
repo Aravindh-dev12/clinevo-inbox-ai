@@ -37,6 +37,12 @@ class ImageFinding(BaseModel):
     requires_human_review: bool = True
 
 
+class AiDecision(BaseModel):
+    classifications: list[Classification]
+    summary: str
+    extracted_facts: dict[str, dict[str, ExtractedValue]] = Field(default_factory=dict)
+
+
 class ProcessingResult(BaseModel):
     file_name: str
     pdf_type: PdfType
@@ -44,7 +50,7 @@ class ProcessingResult(BaseModel):
     ocr_confidence: float | None = None
     classifications: list[Classification]
     summary: str
-    tables: list[TableData] = []
-    images: list[ImageFinding] = []
-    extracted_facts: dict[str, dict[str, ExtractedValue]] = {}
+    tables: list[TableData] = Field(default_factory=list)
+    images: list[ImageFinding] = Field(default_factory=list)
+    extracted_facts: dict[str, dict[str, ExtractedValue]] = Field(default_factory=dict)
     processing_ms: int
