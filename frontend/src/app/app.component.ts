@@ -2,12 +2,13 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
+import { LiteratureScreeningComponent } from './literature-screening.component';
 import { FactOverride, InboxDetail, InboxMessage } from './models';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, LiteratureScreeningComponent],
   templateUrl: './app.component.html'
 })
 export class AppComponent implements OnInit {
