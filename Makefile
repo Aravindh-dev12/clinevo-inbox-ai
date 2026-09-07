@@ -1,4 +1,4 @@
-.PHONY: up down logs test test-ai test-backend test-frontend samples batch
+.PHONY: up down logs test test-ai test-backend test-frontend smoke samples batch
 
 up:
 	docker compose up --build
@@ -19,6 +19,9 @@ test-backend:
 
 test-frontend:
 	cd frontend && npm run build && npm test -- --no-progress
+
+smoke:
+	bash scripts/run_compose_smoke.sh
 
 samples:
 	python samples/scripts/generate_corpus.py
