@@ -1,5 +1,6 @@
 package com.clinevo.inbox.api;
 
+import com.clinevo.inbox.config.RequestCorrelationFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,7 +14,7 @@ import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
-    public record ApiError(Instant timestamp, int status, String error, String message, String path) {}
+    public record ApiError(Instant timestamp, int status, String error, String message, String path, String requestId) {}
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiError> illegalArgument(IllegalArgumentException ex, HttpServletRequest request) {
@@ -23,8 +24,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiError> validation(MethodArgumentNotValidException ex, HttpServletRequest request) {
-        String message = ex.getBindingResult().getFieldErrors().stream()
-                .map(f -> f.getField() + " " + f.getDefaultMessage()).collect(Collectors.joining("; "));
+        String message = ex.getBindingResult().getFieldErrors().stream().map(f -> f.getField() + " " + f.getDefaultMessage()).collect(Collectors.joining("; "));
         return error(HttpStatus.BAD_REQUEST, message, request);
     }
 
@@ -39,6 +39,6 @@ public class ApiExceptionHandler {
     }
 
     private ResponseEntity<ApiError> error(HttpStatus status, String message, HttpServletRequest request) {
-        return ResponseEntity.status(status).body(new ApiError(Instant.now(), status.value(), status.getReasonPhrase(), message, request.getRequestURI()));
+        return ResponseEntity.status(status).body(new ApiError(Instant.now(), status.value(), status.getReasonPhrase(), message, request.getRequestURI(), RequestCorrelationFilter.requestId(request)));
     }
 }

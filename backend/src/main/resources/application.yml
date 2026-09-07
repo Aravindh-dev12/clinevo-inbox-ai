@@ -49,6 +49,10 @@ info:
     name: clinevo-inbox-api
     synthetic-data-only: true
 
+logging:
+  pattern:
+    level: "%5p [requestId:%X{requestId:-system}]"
+
 clinevo:
   ai-service-url: ${AI_SERVICE_URL:http://localhost:8000}
   mail-poll-seconds: ${MAIL_POLL_SECONDS:60}
@@ -61,6 +65,14 @@ clinevo:
   job-batch-size: ${JOB_BATCH_SIZE:4}
   job-retry-base-seconds: ${JOB_RETRY_BASE_SECONDS:5}
   job-lease-seconds: ${JOB_LEASE_SECONDS:300}
+  auth:
+    mode: ${AUTH_MODE:demo}
+    oidc:
+      issuer-uri: ${OIDC_ISSUER_URI:}
+      jwk-set-uri: ${OIDC_JWK_SET_URI:}
+      audience: ${OIDC_AUDIENCE:clinevo-inbox}
+      roles-claim: ${OIDC_ROLES_CLAIM:roles}
+      principal-claim: ${OIDC_PRINCIPAL_CLAIM:preferred_username}
   mail:
     host: ${MAIL_HOST:}
     port: ${MAIL_PORT:993}
