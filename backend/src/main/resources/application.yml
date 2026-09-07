@@ -18,3 +18,10 @@ spring:
 clinevo:
   ai-service-url: ${AI_SERVICE_URL:http://localhost:8000}
   mail-poll-seconds: ${MAIL_POLL_SECONDS:60}
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:993}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    folder: ${MAIL_FOLDER:INBOX}
+    ssl: ${MAIL_SSL:true}
