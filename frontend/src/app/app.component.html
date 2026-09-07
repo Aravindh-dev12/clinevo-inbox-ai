@@ -1,0 +1,119 @@
+<div class="shell">
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">CLINEVO TECHNOLOGIES · CANDIDATE PROTOTYPE</div>
+      <h1>Smart Inbox Review</h1>
+      <p>AI-assisted triage with human confirmation and source-level provenance.</p>
+    </div>
+    <button class="secondary" (click)="refresh()">Refresh queue</button>
+  </header>
+
+  <div class="error" *ngIf="error">{{ error }}</div>
+
+  <main class="workspace">
+    <aside class="queue">
+      <div class="panel-heading">
+        <h2>Incoming queue</h2>
+        <span>{{ items.length }} items</span>
+      </div>
+      <div class="empty" *ngIf="!loading && items.length === 0">No inbox items yet.</div>
+      <button class="queue-item" *ngFor="let item of items" [class.active]="item.id === selectedId" (click)="open(item.id)">
+        <div class="queue-title">{{ item.subject || '(no subject)' }}</div>
+        <div class="queue-meta">{{ item.sender }}</div>
+        <div class="queue-footer">
+          <span class="status">{{ item.status }}</span>
+          <span>{{ item.receivedAt | date:'short' }}</span>
+        </div>
+      </button>
+    </aside>
+
+    <section class="detail" *ngIf="selected as d; else selectPrompt">
+      <div class="message-head">
+        <div>
+          <div class="eyebrow">MESSAGE #{{ d.message.id }}</div>
+          <h2>{{ d.message.subject || '(no subject)' }}</h2>
+          <div class="muted">From {{ d.message.sender }} · {{ d.message.receivedAt | date:'medium' }}</div>
+        </div>
+        <span class="status large">{{ d.message.status }}</span>
+      </div>
+
+      <section class="card">
+        <h3>AI classifications</h3>
+        <div class="chips" *ngIf="d.classifications.length; else noClassification">
+          <div class="classification" *ngFor="let c of d.classifications">
+            <div class="classification-top"><strong>{{ c.category }}</strong><span>{{ confidence(c.confidence) }}</span></div>
+            <div class="meter"><span [style.width.%]="c.confidence * 100"></span></div>
+            <p>{{ c.reason }}</p>
+          </div>
+        </div>
+        <ng-template #noClassification><div class="muted">No classification result has been stored yet.</div></ng-template>
+      </section>
+
+      <section class="card">
+        <h3>Reviewer summary</h3>
+        <p class="summary">{{ d.message.aiSummary || 'Summary pending.' }}</p>
+        <details>
+          <summary>Original email body</summary>
+          <pre>{{ d.message.bodyText || '(empty)' }}</pre>
+        </details>
+      </section>
+
+      <section class="card" *ngIf="d.attachments.length">
+        <h3>Attachments</h3>
+        <div class="attachment" *ngFor="let a of d.attachments">
+          <strong>{{ a.fileName }}</strong>
+          <span>{{ a.pdfType || a.mimeType || 'unknown type' }}</span>
+          <span>language {{ a.detectedLanguage || 'unknown' }}</span>
+          <span *ngIf="a.ocrConfidence != null">OCR {{ confidence(a.ocrConfidence) }}</span>
+          <span>{{ a.processingMs || 0 }} ms</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="panel-heading"><h3>Extracted facts</h3><span>Edit only when the source supports a correction.</span></div>
+        <div class="fact-table" *ngIf="d.facts.length; else noFacts">
+          <div class="fact-row fact-header"><span>Group / field</span><span>Value</span><span>Confidence</span><span>Source</span></div>
+          <div class="fact-row" *ngFor="let f of d.facts">
+            <span><strong>{{ f.factGroup }}</strong><br>{{ f.fieldName }}</span>
+            <span><textarea [(ngModel)]="f.fieldValue" rows="2"></textarea></span>
+            <span>{{ confidence(f.confidence) }}</span>
+            <span class="source" [title]="f.evidenceText || ''">{{ sourceLabel(f.sourcePage, f.sourceName) }}<br><small>{{ f.evidenceText || 'Evidence text unavailable' }}</small></span>
+          </div>
+        </div>
+        <ng-template #noFacts><div class="muted">No structured facts extracted for this item.</div></ng-template>
+      </section>
+
+      <section class="card review-card">
+        <h3>Human review</h3>
+        <div class="review-grid">
+          <label>Reviewer<input [(ngModel)]="reviewer" /></label>
+          <label>Override category
+            <select [(ngModel)]="overrideCategory">
+              <option value="">Keep AI categories</option>
+              <option value="ICSR">ICSR</option>
+              <option value="PQC">PQC</option>
+              <option value="MI">MI</option>
+              <option value="NOT_RELEVANT">Not Relevant</option>
+            </select>
+          </label>
+          <label class="wide">Review note<textarea [(ngModel)]="note" rows="3" placeholder="Reason for override or reviewer note"></textarea></label>
+        </div>
+        <div class="actions">
+          <button class="secondary" (click)="submit('OVERRIDE')">Save override</button>
+          <button class="primary" (click)="submit('ACCEPT')">Accept AI result</button>
+        </div>
+      </section>
+
+      <section class="card" *ngIf="d.reviewActions.length">
+        <h3>Audit trail</h3>
+        <div class="audit" *ngFor="let action of d.reviewActions">
+          <strong>{{ action.actionType }}</strong> · {{ action.reviewer }} · {{ action.createdAt | date:'medium' }}
+          <div class="muted" *ngIf="action.fieldName">{{ action.fieldName }}: {{ action.previousValue }} → {{ action.newValue }}</div>
+          <div class="muted" *ngIf="action.note">{{ action.note }}</div>
+        </div>
+      </section>
+    </section>
+
+    <ng-template #selectPrompt><section class="detail empty-detail">Select an inbox item to review.</section></ng-template>
+  </main>
+</div>
