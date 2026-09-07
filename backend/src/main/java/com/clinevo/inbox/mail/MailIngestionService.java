@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Properties;
 
 @Service
@@ -59,27 +60,40 @@ public class MailIngestionService {
 
     private void ingest(Message raw) throws Exception {
         String messageId = firstHeader(raw, "Message-ID");
-        if (messageId != null && messages.findByInternetMessageId(messageId).isPresent()) {
-            raw.setFlag(Flags.Flag.SEEN, true); return;
+        Optional<InboxMessage> duplicate = messageId == null ? Optional.empty() : messages.findByInternetMessageId(messageId);
+        if (duplicate.isPresent() && processing.hasActiveOrSuccessfulJob(duplicate.get().getId())) {
+            raw.setFlag(Flags.Flag.SEEN, true);
+            return;
         }
+
         ParsedContent parsed = new ParsedContent();
         parsePart(raw, parsed);
-        InboxMessage message = new InboxMessage();
-        message.setInternetMessageId(messageId);
-        message.setSender(raw.getFrom() != null && raw.getFrom().length > 0 ? raw.getFrom()[0].toString() : "unknown");
-        message.setSubject(raw.getSubject());
-        message.setReceivedAt(raw.getReceivedDate() != null ? raw.getReceivedDate().toInstant() : Instant.now());
-        message.setBodyText(parsed.body.toString().trim());
-        message.setStatus("QUEUED");
-        message = messages.save(message);
-        processing.processAsync(message.getId(), message.getBodyText(), List.copyOf(parsed.attachments));
+
+        InboxMessage message;
+        if (duplicate.isPresent()) {
+            message = duplicate.get();
+        } else {
+            message = new InboxMessage();
+            message.setInternetMessageId(messageId);
+            message.setSender(raw.getFrom() != null && raw.getFrom().length > 0 ? raw.getFrom()[0].toString() : "unknown");
+            message.setSubject(raw.getSubject());
+            message.setReceivedAt(raw.getReceivedDate() != null ? raw.getReceivedDate().toInstant() : Instant.now());
+            message.setBodyText(parsed.body.toString().trim());
+            message.setStatus("RECEIVED");
+            message = messages.save(message);
+        }
+
+        processing.enqueue(message.getId(), List.copyOf(parsed.attachments));
         raw.setFlag(Flags.Flag.SEEN, true);
     }
 
     private void parsePart(Part part, ParsedContent output) throws Exception {
         if (part.isMimeType("text/plain") && part.getFileName() == null) {
             Object content = part.getContent();
-            if (content instanceof String text) { if (!output.body.isEmpty()) output.body.append('\n'); output.body.append(text); }
+            if (content instanceof String text) {
+                if (!output.body.isEmpty()) output.body.append('\n');
+                output.body.append(text);
+            }
             return;
         }
         if (part.isMimeType("text/html") && output.body.isEmpty() && part.getFileName() == null) {
@@ -94,15 +108,25 @@ public class MailIngestionService {
         }
         String fileName = part.getFileName();
         if (fileName != null) {
+            String contentType = part.getContentType().split(";", 2)[0];
             int declaredSize = part.getSize();
-            if (declaredSize > maxAttachmentBytes) return;
+            if (declaredSize > maxAttachmentBytes) {
+                output.attachments.add(MailAttachment.rejected(fileName, contentType, "attachment exceeds configured size limit", declaredSize));
+                return;
+            }
             try (InputStream in = part.getInputStream(); ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
-                byte[] buffer = new byte[8192]; int read; long total = 0;
+                byte[] buffer = new byte[8192];
+                int read;
+                long total = 0;
                 while ((read = in.read(buffer)) != -1) {
-                    total += read; if (total > maxAttachmentBytes) return;
+                    total += read;
+                    if (total > maxAttachmentBytes) {
+                        output.attachments.add(MailAttachment.rejected(fileName, contentType, "attachment exceeds configured size limit", total));
+                        return;
+                    }
                     bytes.write(buffer, 0, read);
                 }
-                output.attachments.add(new MailAttachment(fileName, part.getContentType().split(";", 2)[0], bytes.toByteArray()));
+                output.attachments.add(new MailAttachment(fileName, contentType, bytes.toByteArray()));
             }
         }
     }
