@@ -1,0 +1,72 @@
+services:
+  oracle:
+    image: gvenzl/oracle-free:23-slim-faststart
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-local-admin-only}
+      APP_USER: ${DB_USER:-clinevo}
+      APP_USER_PASSWORD: ${DB_PASSWORD:-clinevo_dev_only}
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  ai-service:
+    build: ./ai-service
+    environment:
+      MAX_PDF_BYTES: ${MAX_ATTACHMENT_BYTES:-20971520}
+      LLM_API_URL: ${LLM_API_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-45}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      DB_URL: jdbc:oracle:thin:@oracle:1521/FREEPDB1
+      DB_USER: ${DB_USER:-clinevo}
+      DB_PASSWORD: ${DB_PASSWORD:-clinevo_dev_only}
+      AI_SERVICE_URL: http://ai-service:8000
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-993}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FOLDER: ${MAIL_FOLDER:-INBOX}
+      MAIL_SSL: ${MAIL_SSL:-true}
+      MAIL_POLL_SECONDS: ${MAIL_POLL_SECONDS:-60}
+      CLINEVO_API_KEY: ${CLINEVO_API_KEY:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:4200}
+      MAX_ATTACHMENT_BYTES: ${MAX_ATTACHMENT_BYTES:-20971520}
+    depends_on:
+      oracle: { condition: service_healthy }
+      ai-service: { condition: service_healthy }
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      backend: { condition: service_healthy }
+    ports:
+      - "4200:80"
+
+volumes:
+  oracle-data:

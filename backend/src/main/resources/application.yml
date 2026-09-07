@@ -1,12 +1,26 @@
 server:
   port: ${PORT:8080}
+  shutdown: graceful
 
 spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  servlet:
+    multipart:
+      max-file-size: ${MAX_UPLOAD_SIZE:20MB}
+      max-request-size: ${MAX_REQUEST_SIZE:25MB}
   datasource:
     url: ${DB_URL:jdbc:oracle:thin:@localhost:1521/FREEPDB1}
     username: ${DB_USER:clinevo}
     password: ${DB_PASSWORD:clinevo_dev_only}
     driver-class-name: oracle.jdbc.OracleDriver
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: ${DB_POOL_MIN:2}
+      connection-timeout: 10000
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
   jpa:
     hibernate:
       ddl-auto: none
@@ -16,10 +30,31 @@ spring:
         jdbc:
           time_zone: UTC
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: clinevo-inbox-api
+    synthetic-data-only: true
+
 clinevo:
   ai-service-url: ${AI_SERVICE_URL:http://localhost:8000}
   mail-poll-seconds: ${MAIL_POLL_SECONDS:60}
   cors-origin: ${CORS_ORIGIN:http://localhost:4200}
+  api-key: ${CLINEVO_API_KEY:}
+  max-attachment-bytes: ${MAX_ATTACHMENT_BYTES:20971520}
   mail:
     host: ${MAIL_HOST:}
     port: ${MAIL_PORT:993}
