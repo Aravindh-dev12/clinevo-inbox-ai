@@ -1,15 +1,34 @@
 import os
+import time
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
-from .models import ProcessingResult
+from .literature import screen_literature_pdf
+from .models import LiteratureBatchResult, ProcessingResult
 from .pdf_processor import process_pdf
 
-app = FastAPI(title="Clinevo Inbox AI Service", version="0.2.0", description="Synthetic-data-only document understanding service for the candidate assignment.")
+app = FastAPI(title="Clinevo Inbox AI Service", version="0.3.0", description="Synthetic-data-only document understanding and literature screening service for the candidate assignment.")
 
 
 def _max_pdf_bytes() -> int:
     return int(os.getenv("MAX_PDF_BYTES", str(20 * 1024 * 1024)))
+
+
+def _validate_pdf(file: UploadFile) -> None:
+    content_type = (file.content_type or "").lower()
+    if content_type != "application/pdf" and not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(status_code=415, detail="Only PDF files are supported by the document AI service.")
+
+
+async def _read_pdf(file: UploadFile) -> bytes:
+    _validate_pdf(file)
+    limit = _max_pdf_bytes()
+    data = await file.read(limit + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail=f"Empty PDF: {file.filename or 'unnamed'}")
+    if len(data) > limit:
+        raise HTTPException(status_code=413, detail=f"PDF exceeds the configured processing limit: {file.filename or 'unnamed'}")
+    return data
 
 
 @app.get("/health")
@@ -19,16 +38,32 @@ def health() -> dict[str, str]:
 
 @app.post("/process", response_model=ProcessingResult)
 async def process_document(file: UploadFile = File(...), email_text: str = Form(default="")) -> ProcessingResult:
-    content_type = (file.content_type or "").lower()
-    if content_type != "application/pdf" and not (file.filename or "").lower().endswith(".pdf"):
-        raise HTTPException(status_code=415, detail="Only PDF attachments are processed; other file types should be logged by the Java service.")
-    limit = _max_pdf_bytes()
-    data = await file.read(limit + 1)
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty PDF")
-    if len(data) > limit:
-        raise HTTPException(status_code=413, detail="PDF exceeds the configured processing limit")
+    data = await _read_pdf(file)
     try:
         return process_pdf(file.filename or "attachment.pdf", data, email_text=email_text)
     except Exception as exc:
         raise HTTPException(status_code=422, detail="Document processing failed") from exc
+
+
+@app.post("/literature/screen", response_model=LiteratureBatchResult)
+async def screen_literature(files: list[UploadFile] = File(...)) -> LiteratureBatchResult:
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one article PDF is required")
+    if len(files) > 25:
+        raise HTTPException(status_code=400, detail="A maximum of 25 article PDFs can be screened in one batch")
+
+    started = time.perf_counter()
+    documents = []
+    for file in files:
+        data = await _read_pdf(file)
+        try:
+            documents.append(screen_literature_pdf(file.filename or "article.pdf", data))
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Literature screening failed for {file.filename or 'article.pdf'}") from exc
+
+    return LiteratureBatchResult(
+        documents=documents,
+        total_documents=len(documents),
+        total_cases=sum(item.case_count for item in documents),
+        processing_ms=int((time.perf_counter() - started) * 1000),
+    )

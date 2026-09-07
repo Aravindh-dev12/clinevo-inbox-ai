@@ -54,3 +54,30 @@ class ProcessingResult(BaseModel):
     images: list[ImageFinding] = Field(default_factory=list)
     extracted_facts: dict[str, dict[str, ExtractedValue]] = Field(default_factory=dict)
     processing_ms: int
+
+
+class LiteratureCaseResult(BaseModel):
+    case_id: str
+    reportable: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    relevance_reason: str
+    summary: str
+    classifications: list[Classification] = Field(default_factory=list)
+    extracted_facts: dict[str, dict[str, ExtractedValue]] = Field(default_factory=dict)
+    source_pages: list[int] = Field(default_factory=list)
+
+
+class LiteratureDocumentResult(BaseModel):
+    file_name: str
+    pdf_type: PdfType
+    detected_language: str
+    cases: list[LiteratureCaseResult] = Field(default_factory=list)
+    case_count: int
+    processing_ms: int
+
+
+class LiteratureBatchResult(BaseModel):
+    documents: list[LiteratureDocumentResult] = Field(default_factory=list)
+    total_documents: int
+    total_cases: int
+    processing_ms: int
