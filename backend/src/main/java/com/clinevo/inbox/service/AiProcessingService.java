@@ -1,5 +1,8 @@
 package com.clinevo.inbox.service;
 
+import com.clinevo.inbox.document.DocumentRetentionService;
+import com.clinevo.inbox.document.MalwareScanner;
+import com.clinevo.inbox.document.OriginalDocumentStore;
 import com.clinevo.inbox.domain.InboxMessage;
 import com.clinevo.inbox.mail.MailAttachment;
 import com.clinevo.inbox.repository.InboxMessageRepository;
@@ -29,11 +32,16 @@ import java.util.concurrent.Executor;
 @Service
 public class AiProcessingService {
     private static final Set<String> VALID_CATEGORIES = Set.of("ICSR", "PQC", "MI", "NOT_RELEVANT");
+    private static final Set<String> SCANNABLE_STATUSES = Set.of("SCAN_PENDING", "STAGED", "PROCESSED", "PROCESSING_FAILED");
+    private static final Set<String> PROCESSABLE_ATTACHMENT_STATUSES = Set.of("STAGED_CLEAN", "PROCESSED", "PROCESSING_FAILED");
 
     private final InboxMessageRepository messages;
     private final JdbcTemplate jdbc;
     private final RestClient restClient;
     private final Executor executor;
+    private final MalwareScanner malwareScanner;
+    private final OriginalDocumentStore documentStore;
+    private final DocumentRetentionService retentionService;
     private final int maxAttempts;
     private final int jobBatchSize;
     private final long retryBaseSeconds;
@@ -44,6 +52,9 @@ public class AiProcessingService {
             JdbcTemplate jdbc,
             RestClient.Builder restClientBuilder,
             @Qualifier("aiExecutor") Executor executor,
+            MalwareScanner malwareScanner,
+            OriginalDocumentStore documentStore,
+            DocumentRetentionService retentionService,
             @Value("${clinevo.ai-service-url}") String aiServiceUrl,
             @Value("${clinevo.job-max-attempts:3}") int maxAttempts,
             @Value("${clinevo.job-batch-size:4}") int jobBatchSize,
@@ -54,6 +65,9 @@ public class AiProcessingService {
         this.jdbc = jdbc;
         this.restClient = restClientBuilder.baseUrl(aiServiceUrl).build();
         this.executor = executor;
+        this.malwareScanner = malwareScanner;
+        this.documentStore = documentStore;
+        this.retentionService = retentionService;
         this.maxAttempts = Math.max(1, maxAttempts);
         this.jobBatchSize = Math.max(1, Math.min(jobBatchSize, 20));
         this.retryBaseSeconds = Math.max(1, retryBaseSeconds);
@@ -160,6 +174,11 @@ public class AiProcessingService {
         messages.save(message);
         clearAiResults(messageId);
 
+        List<StoredAttachment> securedAttachments = new ArrayList<>();
+        for (StoredAttachment attachment : loadAttachments(messageId)) {
+            securedAttachments.add(secureAttachment(messageId, attachment));
+        }
+
         Map<String, ClassificationCandidate> classifications = new HashMap<>();
         List<String> summaries = new ArrayList<>();
         String emailText = message.getBodyText() == null ? "" : message.getBodyText();
@@ -171,15 +190,16 @@ public class AiProcessingService {
             if (!summary.isBlank()) summaries.add("Email: " + summary);
         }
 
-        for (StoredAttachment attachment : loadAttachments(messageId)) {
+        for (StoredAttachment attachment : securedAttachments) {
             if (!attachment.shouldProcess()) continue;
             try {
-                JsonNode result = callPdfAiService(emailText, attachment);
-                updateAttachmentResult(attachment.id(), result);
+                StoredAttachment materialized = materializeAttachmentBytes(attachment);
+                JsonNode result = callPdfAiService(emailText, materialized);
+                updateAttachmentResult(materialized.id(), result);
                 collectClassifications(classifications, result);
-                persistFacts(messageId, attachment.id(), result);
+                persistFacts(messageId, materialized.id(), result);
                 String summary = result.path("summary").asText("");
-                if (!summary.isBlank()) summaries.add(attachment.fileName() + ": " + summary);
+                if (!summary.isBlank()) summaries.add(materialized.fileName() + ": " + summary);
             } catch (Exception ex) {
                 jdbc.update("UPDATE ATTACHMENT SET PROCESSING_STATUS='PROCESSING_FAILED' WHERE ID=?", attachment.id());
                 throw ex;
@@ -209,6 +229,9 @@ public class AiProcessingService {
     }
 
     private JsonNode callPdfAiService(String emailText, StoredAttachment attachment) {
+        if (!"CLEAN".equals(attachment.scanStatus())) {
+            throw new IllegalStateException("Attachment cannot reach AI processing without a CLEAN malware scan");
+        }
         MultipartBodyBuilder body = new MultipartBodyBuilder();
         body.part("email_text", emailText);
         body.part("file", new ByteArrayResource(attachment.bytes()) {
@@ -226,11 +249,65 @@ public class AiProcessingService {
 
     private List<StoredAttachment> loadAttachments(long messageId) {
         return jdbc.query("""
-                SELECT ID, FILE_NAME, MIME_TYPE, CONTENT_BLOB, PROCESSING_STATUS
+                SELECT ID, FILE_NAME, MIME_TYPE, CONTENT_BLOB, PROCESSING_STATUS, SHA256,
+                       STORAGE_PROVIDER, STORAGE_KEY, MALWARE_SCAN_STATUS
                 FROM ATTACHMENT WHERE MESSAGE_ID = ? ORDER BY ID
                 """, (rs, rowNum) -> new StoredAttachment(
                 rs.getLong("ID"), rs.getString("FILE_NAME"), rs.getString("MIME_TYPE"),
-                rs.getBytes("CONTENT_BLOB"), rs.getString("PROCESSING_STATUS")), messageId);
+                rs.getBytes("CONTENT_BLOB"), rs.getString("PROCESSING_STATUS"), rs.getString("SHA256"),
+                rs.getString("STORAGE_PROVIDER"), rs.getString("STORAGE_KEY"), rs.getString("MALWARE_SCAN_STATUS")), messageId);
+    }
+
+    private StoredAttachment secureAttachment(long messageId, StoredAttachment attachment) {
+        if (!attachment.requiresScan()) return attachment;
+        byte[] bytes = materializeAttachmentBytes(attachment).bytes();
+        MalwareScanner.ScanResult scan = malwareScanner.scan(bytes, attachment.fileName());
+        Instant now = Instant.now();
+        Instant retentionUntil = retentionService.retentionUntil(now);
+
+        if (!scan.cleanResult()) {
+            OriginalDocumentStore.StoredObject quarantined = documentStore.storeQuarantine(attachment.sha256(), bytes);
+            byte[] stagedBytes = documentStore.external() ? null : bytes;
+            jdbc.update("""
+                    UPDATE ATTACHMENT
+                    SET PROCESSING_STATUS='QUARANTINED_MALWARE', MALWARE_SCAN_STATUS='INFECTED',
+                        MALWARE_SIGNATURE=?, SCANNED_AT=?, STORAGE_PROVIDER=?, STORAGE_KEY=?,
+                        RETENTION_UNTIL=?, CONTENT_BLOB=?
+                    WHERE ID=?
+                    """, limit(scan.signature(), 500), now, quarantined.provider(), quarantined.key(),
+                    retentionUntil, stagedBytes, attachment.id());
+            audit(messageId, "ATTACHMENT_MALWARE_DETECTED", "SYSTEM",
+                    "attachmentId=" + attachment.id() + ", sha256Prefix=" + shaPrefix(attachment.sha256()) + ", signature=" + limit(scan.signature(), 500));
+            return new StoredAttachment(attachment.id(), attachment.fileName(), attachment.contentType(), stagedBytes,
+                    "QUARANTINED_MALWARE", attachment.sha256(), quarantined.provider(), quarantined.key(), "INFECTED");
+        }
+
+        OriginalDocumentStore.StoredObject stored = documentStore.storeOriginal(attachment.sha256(), bytes);
+        byte[] stagedBytes = documentStore.external() ? null : bytes;
+        jdbc.update("""
+                UPDATE ATTACHMENT
+                SET PROCESSING_STATUS='STAGED_CLEAN', MALWARE_SCAN_STATUS='CLEAN', MALWARE_SIGNATURE=NULL,
+                    SCANNED_AT=?, STORAGE_PROVIDER=?, STORAGE_KEY=?, RETENTION_UNTIL=?, CONTENT_BLOB=?
+                WHERE ID=?
+                """, now, stored.provider(), stored.key(), retentionUntil, stagedBytes, attachment.id());
+        audit(messageId, "ATTACHMENT_SCAN_CLEAN", "SYSTEM",
+                "attachmentId=" + attachment.id() + ", sha256Prefix=" + shaPrefix(attachment.sha256()) + ", storage=" + stored.provider());
+        return new StoredAttachment(attachment.id(), attachment.fileName(), "application/pdf", bytes,
+                "STAGED_CLEAN", attachment.sha256(), stored.provider(), stored.key(), "CLEAN");
+    }
+
+    private StoredAttachment materializeAttachmentBytes(StoredAttachment attachment) {
+        byte[] bytes = attachment.bytes();
+        if ((bytes == null || bytes.length == 0) && attachment.storageKey() != null) {
+            bytes = documentStore.load(attachment.storageKey());
+        }
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalStateException("Attachment content is unavailable for processing");
+        }
+        if (attachment.sha256() != null && !attachment.sha256().equals(sha256(bytes))) {
+            throw new IllegalStateException("Stored attachment failed SHA-256 integrity verification");
+        }
+        return attachment.withBytes(bytes);
     }
 
     private void stageAttachment(long messageId, MailAttachment attachment) {
@@ -238,27 +315,34 @@ public class AiProcessingService {
         String mimeType = attachment.contentType() == null ? "application/octet-stream" : attachment.contentType();
         byte[] bytes = attachment.bytes() == null ? new byte[0] : attachment.bytes();
         String status;
+        String scanStatus;
         String rejectionReason = attachment.rejectionReason();
         if (attachment.rejected()) {
             status = "REJECTED_TOO_LARGE";
+            scanStatus = "NOT_REQUIRED";
         } else if (hasPdfSignature(bytes)) {
-            status = "STAGED";
+            status = "SCAN_PENDING";
+            scanStatus = "PENDING";
             mimeType = "application/pdf";
         } else if (attachment.isPdf()) {
             status = "REJECTED_INVALID_PDF";
+            scanStatus = "NOT_REQUIRED";
             rejectionReason = "file was labeled as PDF but did not contain a PDF signature";
         } else {
             status = "LOGGED_UNSUPPORTED";
+            scanStatus = "NOT_REQUIRED";
         }
         String sha = bytes.length == 0 ? null : sha256(bytes);
+        byte[] stagedBytes = "SCAN_PENDING".equals(status) ? bytes : null;
+        String storageProvider = stagedBytes == null ? null : "DATABASE_STAGING";
         jdbc.update("""
                 INSERT INTO ATTACHMENT
                   (ID, MESSAGE_ID, FILE_NAME, MIME_TYPE, SHA256, ORIGINAL_SIZE, CONTENT_BLOB,
-                   REJECTION_REASON, PROCESSING_STATUS, CREATED_AT)
+                   REJECTION_REASON, PROCESSING_STATUS, MALWARE_SCAN_STATUS, STORAGE_PROVIDER, CREATED_AT)
                 VALUES
-                  (ATTACHMENT_SEQ.NEXTVAL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, messageId, fileName, mimeType, sha, attachment.originalSize(), bytes.length == 0 ? null : bytes,
-                rejectionReason, status, Instant.now());
+                  (ATTACHMENT_SEQ.NEXTVAL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, messageId, fileName, mimeType, sha, attachment.originalSize(), stagedBytes,
+                rejectionReason, status, scanStatus, storageProvider, Instant.now());
         if (status.startsWith("REJECTED")) audit(messageId, "ATTACHMENT_REJECTED", "SYSTEM", fileName + ": " + rejectionReason);
     }
 
@@ -388,6 +472,11 @@ public class AiProcessingService {
         }
     }
 
+    private String shaPrefix(String sha) {
+        if (sha == null) return "unknown";
+        return sha.substring(0, Math.min(16, sha.length()));
+    }
+
     private String safeFileName(String raw) {
         if (raw == null || raw.isBlank()) return "attachment";
         String normalized = raw.replace('\\', '/');
@@ -404,9 +493,27 @@ public class AiProcessingService {
         return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
     }
 
-    private record StoredAttachment(long id, String fileName, String contentType, byte[] bytes, String status) {
+    private record StoredAttachment(
+            long id,
+            String fileName,
+            String contentType,
+            byte[] bytes,
+            String status,
+            String sha256,
+            String storageProvider,
+            String storageKey,
+            String scanStatus
+    ) {
+        boolean requiresScan() {
+            return !"CLEAN".equals(scanStatus) && SCANNABLE_STATUSES.contains(status) && sha256 != null;
+        }
+
         boolean shouldProcess() {
-            return bytes != null && bytes.length >= 5 && Set.of("STAGED", "PROCESSED", "PROCESSING_FAILED").contains(status);
+            return "CLEAN".equals(scanStatus) && PROCESSABLE_ATTACHMENT_STATUSES.contains(status);
+        }
+
+        StoredAttachment withBytes(byte[] newBytes) {
+            return new StoredAttachment(id, fileName, contentType, newBytes, status, sha256, storageProvider, storageKey, scanStatus);
         }
     }
 
