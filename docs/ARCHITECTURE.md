@@ -1,64 +1,170 @@
 # Architecture
 
-## Goal
+## Objective
 
-Automate the first-pass review of incoming healthcare safety mailbox messages while keeping a human reviewer in control. The application classifies each message into one or more of ICSR, PQC, MI, or Not Relevant; extracts structured facts; records confidence; and preserves source provenance down to email/PDF page.
+Automate the first-pass review of incoming healthcare safety mailbox messages while keeping a human reviewer in control. Each message can receive one or more labels: ICSR, PQC, MI, or Not Relevant. Structured facts carry confidence and source provenance down to email/PDF page.
 
-## System flow
+## Runtime architecture
 
 ```mermaid
-flowchart LR
-    M[Test mailbox] --> B[Spring Boot mailbox ingestion]
-    B --> Q[Processing job queue]
-    Q --> P[Python FastAPI AI service]
-    P --> X[PDF/OCR/LLM pipeline]
-    X --> B
-    B --> O[(Oracle DB)]
-    A[Angular reviewer UI] --> B
-    B --> A
+flowchart TB
+  subgraph Intake
+    MB[Test IMAP mailbox]
+    LU[Independent literature upload]
+  end
+
+  subgraph UI[Angular reviewer application]
+    Q[Inbox queue]
+    R[Review detail / editable facts]
+    L[Literature screening]
+  end
+
+  subgraph API[Spring Boot orchestration]
+    MI[Mail ingestion]
+    REST[REST API]
+    W[Bounded async worker]
+    AUD[Review + audit persistence]
+  end
+
+  subgraph AI[Python FastAPI document service]
+    DT[PDF flavor detection]
+    TXT[Digital text / article extraction]
+    OCR[Tesseract OCR]
+    TAB[Table extraction]
+    IMG[Image detection / review flag]
+    CLS[Classification + extraction]
+    SLLM[Optional structured LLM]
+    PROV[Provenance validation]
+  end
+
+  DB[(Oracle DB)]
+
+  MB --> MI --> DB
+  MI --> W --> AI
+  AI --> W --> DB
+  Q --> REST
+  R --> REST
+  REST --> DB
+  REST --> AUD --> DB
+  LU --> L --> REST --> AI
+  DT --> TXT
+  DT --> OCR
+  TXT --> CLS
+  OCR --> CLS
+  TXT --> TAB
+  TXT --> IMG
+  CLS --> SLLM --> PROV
 ```
 
-## Responsibilities
+## Component responsibilities
 
 ### Angular
-- Review queue with classification, confidence, and summaries.
-- Item detail view with editable extracted facts.
-- Accept/override actions.
-- Source provenance display for every extracted value.
+
+- Inbox review queue.
+- Classification confidence/reasons.
+- Attachment flavor, language, OCR confidence and processing time.
+- Editable extracted facts.
+- Source-page/evidence display.
+- Accept/override review actions.
+- Timestamped audit history.
+- Independent literature batch uploader and per-case results.
 
 ### Spring Boot
-- Test-mailbox ingestion.
-- REST API and orchestration.
-- Asynchronous processing queue.
-- Calls the Python AI service.
-- Persists messages, attachments, AI results, reviewer actions, and audit events.
 
-### Python AI service
-- Detect PDF flavor: digital, scanned/handwritten, published article, or non-English.
-- Extract text/tables and image descriptions.
-- OCR/vision hook for scanned content.
-- Structured multi-label classification and extraction.
-- Return confidence plus source page/provenance.
-- Never invent missing values; use `Not stated`/`unknown`.
+- IMAP/IMAPS mailbox polling.
+- Message-ID de-duplication.
+- MIME body/attachment parsing.
+- REST API and validation.
+- Bounded asynchronous document orchestration.
+- AI-service multipart calls.
+- Oracle persistence.
+- Reviewer action / override persistence.
+- Input-size limits and optional mutation API-key guard.
+- Actuator health/metrics and graceful shutdown.
+
+### Python FastAPI
+
+- PDF flavor detection: digital, scanned/handwritten, published article, non-English.
+- Direct text extraction and OCR fallback.
+- Language detection.
+- Table extraction into structured rows.
+- Embedded-image review flags.
+- 10-sentence reviewer summary.
+- Multi-label ICSR/PQC/MI/Not Relevant classification.
+- Conservative structured extraction with `Not stated` for gaps.
+- Optional structured-LLM path.
+- Validation of LLM field provenance against actual source content.
+- Literature case splitting and case-level screening.
 
 ### Oracle
-- Queryable store for messages, attachments, processing jobs, classifications, extracted facts, and audit history.
 
-## Queue strategy
-
-The prototype uses a bounded in-process executor in Spring Boot. Mail intake creates a processing job and returns quickly. A worker invokes the AI service and persists results. Production would move this to a durable queue such as Kafka/SQS/RabbitMQ with idempotency keys and retry/dead-letter policies.
-
-## Data handling
-
-Only synthetic data is permitted in development and demonstration. Secrets are supplied through environment variables and must never be committed. If a cloud model is enabled, the README/write-up must call out the data-retention and residency trade-offs.
+Queryable storage for messages, attachment metadata, classifications, extracted facts, reviewer actions and audit events. Flyway owns the application migration lifecycle.
 
 ## Provenance contract
 
-Every extracted field stores:
-- source type (`EMAIL` or `PDF`)
-- source identifier/file name
-- PDF page number when applicable
-- evidence text/snippet where safe
-- field-level confidence
+A supported extracted field contains:
 
-This provenance is treated as part of the domain model, not UI-only metadata.
+```json
+{
+  "value": "45",
+  "confidence": 0.97,
+  "source": {
+    "source_type": "PDF",
+    "source_name": "safety-report-01.pdf",
+    "page": 2,
+    "evidence": "...45-year-old patient..."
+  }
+}
+```
+
+If the source does not state the field, the value is `Not stated`, confidence is `0.0`, and source is `null`.
+
+## Processing states
+
+```mermaid
+stateDiagram-v2
+  [*] --> RECEIVED
+  RECEIVED --> QUEUED
+  QUEUED --> PROCESSING
+  PROCESSING --> READY_FOR_REVIEW
+  PROCESSING --> PROCESSING_FAILED
+  READY_FOR_REVIEW --> REVIEW_ACCEPTED
+  READY_FOR_REVIEW --> REVIEW_OVERRIDDEN
+```
+
+The current candidate implementation uses a bounded in-process executor so mail polling is not blocked by OCR/AI latency. Production evolution should replace this with durable job semantics so a process restart cannot lose queued work.
+
+## AI decision strategy
+
+The AI layer has two modes.
+
+1. **Deterministic fallback** for offline/local/CI repeatability. It applies the assignment's four-element ICSR rule, negation-aware safety terms and conservative extraction.
+2. **Structured LLM mode** for richer understanding. The service sends a strict extraction contract, validates returned JSON with Pydantic and then validates claimed page/evidence provenance against the actual input. A field with unsupported evidence is discarded rather than accepted.
+
+This separation gives predictable automated tests without pretending deterministic regexes are sufficient for a production pharmacovigilance system.
+
+## Security boundaries
+
+- Secrets are externalized through environment variables.
+- The repository and generated corpus contain synthetic data only.
+- Upload/body sizes are bounded.
+- Mutation endpoints can require a constant-time API-key check.
+- Container workloads run with reduced privileges where practical.
+- Cloud LLM use is opt-in.
+
+Production must add enterprise identity (OIDC/OAuth2), RBAC, TLS/mTLS, secret vault integration, malware scanning, encryption/key management, audit export to SIEM, approved model/provider controls and retention policies.
+
+## Production evolution
+
+The highest-value production changes are:
+
+1. Durable queue with retry, backoff, idempotency and dead-letter handling.
+2. Immutable encrypted original-document storage with lifecycle/retention policy.
+3. OIDC/OAuth2 identity and reviewer/admin roles.
+4. Centralized secrets and certificate management.
+5. Distributed tracing, structured logs, metrics, dashboards and alerts.
+6. Malware scanning and file-content validation before document parsing.
+7. Approved cloud-model gateway or private model hosting with regional/data-retention controls.
+8. Evaluation harness with labeled domain data, drift monitoring and reviewer-agreement metrics.
+9. High-availability Oracle deployment, backup/restore testing and disaster recovery.
+10. Formal validation package appropriate for regulated GxP / pharmacovigilance usage.
