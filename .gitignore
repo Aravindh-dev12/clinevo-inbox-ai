@@ -1,0 +1,30 @@
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Environment / secrets
+.env
+*.local
+
+# Java
+backend/target/
+*.class
+
+# Python
+ai-service/.venv/
+ai-service/__pycache__/
+ai-service/.pytest_cache/
+*.py[cod]
+
+# Angular / Node
+frontend/node_modules/
+frontend/dist/
+.angular/
+
+# Synthetic generated artifacts
+samples/generated/
+
+# Logs
+*.log
+logs/
