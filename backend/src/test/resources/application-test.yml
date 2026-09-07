@@ -17,6 +17,12 @@ spring:
 clinevo:
   api-key: ""
   ai-service-url: http://localhost:65535
+  job-poll-ms: 3600000
+  job-recovery-ms: 3600000
+  job-max-attempts: 3
+  job-batch-size: 2
+  job-retry-base-seconds: 1
+  job-lease-seconds: 60
   mail:
     host: ""
 logging:

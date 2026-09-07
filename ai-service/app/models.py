@@ -56,6 +56,18 @@ class ProcessingResult(BaseModel):
     processing_ms: int
 
 
+class TextProcessingRequest(BaseModel):
+    source_name: str = "email"
+    text: str = ""
+
+
+class TextProcessingResult(BaseModel):
+    classifications: list[Classification]
+    summary: str
+    extracted_facts: dict[str, dict[str, ExtractedValue]] = Field(default_factory=dict)
+    processing_ms: int
+
+
 class LiteratureCaseResult(BaseModel):
     case_id: str
     reportable: bool

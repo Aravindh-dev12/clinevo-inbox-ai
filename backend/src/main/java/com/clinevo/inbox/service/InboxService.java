@@ -15,10 +15,12 @@ import java.util.List;
 public class InboxService {
     private final InboxMessageRepository repository;
     private final JdbcTemplate jdbc;
+    private final AiProcessingService processing;
 
-    public InboxService(InboxMessageRepository repository, JdbcTemplate jdbc) {
+    public InboxService(InboxMessageRepository repository, JdbcTemplate jdbc, AiProcessingService processing) {
         this.repository = repository;
         this.jdbc = jdbc;
+        this.processing = processing;
     }
 
     @Transactional(readOnly = true)
@@ -35,8 +37,9 @@ public class InboxService {
     @Transactional
     public InboxMessage queue(long id) {
         InboxMessage item = get(id);
+        processing.requeueExisting(id);
         item.setStatus("QUEUED");
-        audit(id, "MESSAGE_REQUEUED", "USER", "manual processing request");
+        audit(id, "MESSAGE_REQUEUED", "USER", "manual durable processing request");
         return repository.save(item);
     }
 

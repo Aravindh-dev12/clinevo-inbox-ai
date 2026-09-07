@@ -55,6 +55,12 @@ clinevo:
   cors-origin: ${CORS_ORIGIN:http://localhost:4200}
   api-key: ${CLINEVO_API_KEY:}
   max-attachment-bytes: ${MAX_ATTACHMENT_BYTES:20971520}
+  job-poll-ms: ${JOB_POLL_MS:1000}
+  job-recovery-ms: ${JOB_RECOVERY_MS:30000}
+  job-max-attempts: ${JOB_MAX_ATTEMPTS:3}
+  job-batch-size: ${JOB_BATCH_SIZE:4}
+  job-retry-base-seconds: ${JOB_RETRY_BASE_SECONDS:5}
+  job-lease-seconds: ${JOB_LEASE_SECONDS:300}
   mail:
     host: ${MAIL_HOST:}
     port: ${MAIL_PORT:993}

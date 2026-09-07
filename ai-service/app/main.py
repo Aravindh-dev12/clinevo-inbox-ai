@@ -4,10 +4,11 @@ import time
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
 from .literature import screen_literature_pdf
-from .models import LiteratureBatchResult, ProcessingResult
+from .models import LiteratureBatchResult, ProcessingResult, TextProcessingRequest, TextProcessingResult
 from .pdf_processor import process_pdf
+from .text_processor import process_text
 
-app = FastAPI(title="Clinevo Inbox AI Service", version="0.3.0", description="Synthetic-data-only document understanding and literature screening service for the candidate assignment.")
+app = FastAPI(title="Clinevo Inbox AI Service", version="0.4.0", description="Synthetic-data-only document understanding and literature screening service for the candidate assignment.")
 
 
 def _max_pdf_bytes() -> int:
@@ -28,6 +29,8 @@ async def _read_pdf(file: UploadFile) -> bytes:
         raise HTTPException(status_code=400, detail=f"Empty PDF: {file.filename or 'unnamed'}")
     if len(data) > limit:
         raise HTTPException(status_code=413, detail=f"PDF exceeds the configured processing limit: {file.filename or 'unnamed'}")
+    if not data.startswith(b"%PDF-"):
+        raise HTTPException(status_code=415, detail=f"File does not contain a valid PDF signature: {file.filename or 'unnamed'}")
     return data
 
 
@@ -43,6 +46,11 @@ async def process_document(file: UploadFile = File(...), email_text: str = Form(
         return process_pdf(file.filename or "attachment.pdf", data, email_text=email_text)
     except Exception as exc:
         raise HTTPException(status_code=422, detail="Document processing failed") from exc
+
+
+@app.post("/process-text", response_model=TextProcessingResult)
+def process_email_body(request: TextProcessingRequest) -> TextProcessingResult:
+    return process_text(request.source_name, request.text)
 
 
 @app.post("/literature/screen", response_model=LiteratureBatchResult)

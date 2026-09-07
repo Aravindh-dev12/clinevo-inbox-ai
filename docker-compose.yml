@@ -49,6 +49,12 @@ services:
       CLINEVO_API_KEY: ${CLINEVO_API_KEY:-}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:4200}
       MAX_ATTACHMENT_BYTES: ${MAX_ATTACHMENT_BYTES:-20971520}
+      JOB_POLL_MS: ${JOB_POLL_MS:-1000}
+      JOB_RECOVERY_MS: ${JOB_RECOVERY_MS:-30000}
+      JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
+      JOB_BATCH_SIZE: ${JOB_BATCH_SIZE:-4}
+      JOB_RETRY_BASE_SECONDS: ${JOB_RETRY_BASE_SECONDS:-5}
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-300}
     depends_on:
       oracle: { condition: service_healthy }
       ai-service: { condition: service_healthy }
