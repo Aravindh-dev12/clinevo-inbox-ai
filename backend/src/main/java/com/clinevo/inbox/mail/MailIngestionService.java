@@ -27,6 +27,7 @@ public class MailIngestionService {
     @Value("${clinevo.mail.password:}") private String password;
     @Value("${clinevo.mail.folder:INBOX}") private String folderName;
     @Value("${clinevo.mail.ssl:true}") private boolean ssl;
+    @Value("${clinevo.max-attachment-bytes:20971520}") private long maxAttachmentBytes;
 
     public MailIngestionService(InboxMessageRepository messages, AiProcessingService processing) {
         this.messages = messages;
@@ -35,29 +36,23 @@ public class MailIngestionService {
 
     @Scheduled(fixedDelayString = "#{${clinevo.mail-poll-seconds:60} * 1000}")
     public void poll() {
-        if (host.isBlank() || username.isBlank() || password.isBlank()) {
-            return; // mailbox integration is opt-in through environment variables
-        }
-
+        if (host.isBlank() || username.isBlank() || password.isBlank()) return;
         String protocol = ssl ? "imaps" : "imap";
         Properties props = new Properties();
         props.put("mail.store.protocol", protocol);
         props.put("mail." + protocol + ".ssl.enable", Boolean.toString(ssl));
-
+        props.put("mail." + protocol + ".connectiontimeout", "10000");
+        props.put("mail." + protocol + ".timeout", "30000");
         try {
             Session session = Session.getInstance(props);
             try (Store store = session.getStore(protocol)) {
                 store.connect(host, port, username, password);
                 try (Folder folder = store.getFolder(folderName)) {
                     folder.open(Folder.READ_WRITE);
-                    Message[] unread = folder.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false));
-                    for (Message raw : unread) {
-                        ingest(raw);
-                    }
+                    for (Message raw : folder.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false))) ingest(raw);
                 }
             }
         } catch (Exception ex) {
-            // Prototype keeps the scheduler alive. Production should emit metrics/alerts and use retry policy.
             System.err.println("Mailbox poll failed: " + ex.getClass().getSimpleName());
         }
     }
@@ -65,13 +60,10 @@ public class MailIngestionService {
     private void ingest(Message raw) throws Exception {
         String messageId = firstHeader(raw, "Message-ID");
         if (messageId != null && messages.findByInternetMessageId(messageId).isPresent()) {
-            raw.setFlag(Flags.Flag.SEEN, true);
-            return;
+            raw.setFlag(Flags.Flag.SEEN, true); return;
         }
-
         ParsedContent parsed = new ParsedContent();
         parsePart(raw, parsed);
-
         InboxMessage message = new InboxMessage();
         message.setInternetMessageId(messageId);
         message.setSender(raw.getFrom() != null && raw.getFrom().length > 0 ? raw.getFrom()[0].toString() : "unknown");
@@ -80,7 +72,6 @@ public class MailIngestionService {
         message.setBodyText(parsed.body.toString().trim());
         message.setStatus("QUEUED");
         message = messages.save(message);
-
         processing.processAsync(message.getId(), message.getBodyText(), List.copyOf(parsed.attachments));
         raw.setFlag(Flags.Flag.SEEN, true);
     }
@@ -88,33 +79,29 @@ public class MailIngestionService {
     private void parsePart(Part part, ParsedContent output) throws Exception {
         if (part.isMimeType("text/plain") && part.getFileName() == null) {
             Object content = part.getContent();
-            if (content instanceof String text) {
-                if (!output.body.isEmpty()) output.body.append('\n');
-                output.body.append(text);
-            }
+            if (content instanceof String text) { if (!output.body.isEmpty()) output.body.append('\n'); output.body.append(text); }
             return;
         }
-
         if (part.isMimeType("text/html") && output.body.isEmpty() && part.getFileName() == null) {
             Object content = part.getContent();
-            if (content instanceof String html) {
-                output.body.append(html.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim());
-            }
+            if (content instanceof String html) output.body.append(html.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim());
             return;
         }
-
         if (part.isMimeType("multipart/*")) {
             Multipart multipart = (Multipart) part.getContent();
-            for (int i = 0; i < multipart.getCount(); i++) {
-                parsePart(multipart.getBodyPart(i), output);
-            }
+            for (int i = 0; i < multipart.getCount(); i++) parsePart(multipart.getBodyPart(i), output);
             return;
         }
-
         String fileName = part.getFileName();
         if (fileName != null) {
+            int declaredSize = part.getSize();
+            if (declaredSize > maxAttachmentBytes) return;
             try (InputStream in = part.getInputStream(); ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
-                in.transferTo(bytes);
+                byte[] buffer = new byte[8192]; int read; long total = 0;
+                while ((read = in.read(buffer)) != -1) {
+                    total += read; if (total > maxAttachmentBytes) return;
+                    bytes.write(buffer, 0, read);
+                }
                 output.attachments.add(new MailAttachment(fileName, part.getContentType().split(";", 2)[0], bytes.toByteArray()));
             }
         }
