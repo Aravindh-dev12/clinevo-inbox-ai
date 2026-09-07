@@ -30,12 +30,14 @@ public class ReviewViewService {
                 rs.getString("CATEGORY"), rs.getBigDecimal("CONFIDENCE"), rs.getString("REASON")), id);
 
         List<InboxDetailView.AttachmentView> attachments = jdbc.query("""
-                SELECT ID, FILE_NAME, MIME_TYPE, PDF_TYPE, DETECTED_LANGUAGE, OCR_CONFIDENCE, PROCESSING_MS, PROCESSING_STATUS
+                SELECT ID, FILE_NAME, MIME_TYPE, PDF_TYPE, DETECTED_LANGUAGE, OCR_CONFIDENCE,
+                       PROCESSING_MS, PROCESSING_STATUS, MALWARE_SCAN_STATUS, STORAGE_PROVIDER, SHA256
                 FROM ATTACHMENT WHERE MESSAGE_ID = ? ORDER BY ID
                 """, (rs, row) -> new InboxDetailView.AttachmentView(
                 rs.getLong("ID"), rs.getString("FILE_NAME"), rs.getString("MIME_TYPE"), rs.getString("PDF_TYPE"),
                 rs.getString("DETECTED_LANGUAGE"), rs.getBigDecimal("OCR_CONFIDENCE"),
-                nullableLong(rs.getObject("PROCESSING_MS")), rs.getString("PROCESSING_STATUS")), id);
+                nullableLong(rs.getObject("PROCESSING_MS")), rs.getString("PROCESSING_STATUS"),
+                rs.getString("MALWARE_SCAN_STATUS"), rs.getString("STORAGE_PROVIDER"), rs.getString("SHA256")), id);
 
         List<InboxDetailView.FactView> facts = jdbc.query("""
                 SELECT ID, FACT_GROUP, FIELD_NAME, FIELD_VALUE, CONFIDENCE, SOURCE_TYPE, SOURCE_NAME, SOURCE_PAGE, EVIDENCE_TEXT
@@ -53,7 +55,15 @@ public class ReviewViewService {
                 clobText(rs.getObject("PREVIOUS_VALUE")), clobText(rs.getObject("NEW_VALUE")), rs.getString("NOTE"),
                 rs.getTimestamp("CREATED_AT").toInstant()), id);
 
-        return new InboxDetailView(message, classifications, attachments, facts, actions);
+        List<InboxDetailView.ProcessingJobView> jobs = jdbc.query("""
+                SELECT ID, STATUS, ATTEMPT_COUNT, MAX_ATTEMPTS, NEXT_ATTEMPT_AT, LAST_ERROR, CREATED_AT, UPDATED_AT
+                FROM PROCESSING_JOB WHERE MESSAGE_ID = ? ORDER BY CREATED_AT DESC, ID DESC
+                """, (rs, row) -> new InboxDetailView.ProcessingJobView(
+                rs.getLong("ID"), rs.getString("STATUS"), rs.getInt("ATTEMPT_COUNT"), rs.getInt("MAX_ATTEMPTS"),
+                rs.getTimestamp("NEXT_ATTEMPT_AT").toInstant(), rs.getString("LAST_ERROR"),
+                rs.getTimestamp("CREATED_AT").toInstant(), rs.getTimestamp("UPDATED_AT").toInstant()), id);
+
+        return new InboxDetailView(message, classifications, attachments, facts, actions, jobs);
     }
 
     private static Long nullableLong(Object value) { return value == null ? null : ((Number) value).longValue(); }
