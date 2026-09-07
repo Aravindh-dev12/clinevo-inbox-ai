@@ -1,0 +1,27 @@
+.PHONY: up down logs test test-ai test-backend test-frontend samples batch
+
+up:
+	docker compose up --build
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f --tail=200
+
+test: test-ai test-backend test-frontend
+
+test-ai:
+	cd ai-service && pytest -q tests
+
+test-backend:
+	cd backend && mvn -B test
+
+test-frontend:
+	cd frontend && npm run build && npm test -- --no-progress
+
+samples:
+	python samples/scripts/generate_corpus.py
+
+batch:
+	python samples/scripts/run_batch.py --url http://localhost:8000
