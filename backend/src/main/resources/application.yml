@@ -73,6 +73,19 @@ clinevo:
       audience: ${OIDC_AUDIENCE:clinevo-inbox}
       roles-claim: ${OIDC_ROLES_CLAIM:roles}
       principal-claim: ${OIDC_PRINCIPAL_CLAIM:preferred_username}
+  malware:
+    enabled: ${MALWARE_SCAN_ENABLED:true}
+    host: ${CLAMAV_HOST:localhost}
+    port: ${CLAMAV_PORT:3310}
+    connect-timeout-ms: ${CLAMAV_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${CLAMAV_READ_TIMEOUT_MS:30000}
+    chunk-bytes: ${CLAMAV_CHUNK_BYTES:8192}
+  document-storage:
+    mode: ${DOCUMENT_STORAGE_MODE:database}
+    root: ${DOCUMENT_STORAGE_ROOT:/var/lib/clinevo/documents}
+    retention-days: ${DOCUMENT_RETENTION_DAYS:0}
+    purge-poll-ms: ${DOCUMENT_PURGE_POLL_MS:3600000}
+    purge-batch-size: ${DOCUMENT_PURGE_BATCH_SIZE:50}
   mail:
     host: ${MAIL_HOST:}
     port: ${MAIL_PORT:993}
