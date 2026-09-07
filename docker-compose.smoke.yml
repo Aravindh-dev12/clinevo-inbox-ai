@@ -1,0 +1,39 @@
+services:
+  greenmail:
+    image: greenmail/standalone:2.1.12
+    environment:
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.smtp
+        -Dgreenmail.setup.test.imap
+        -Dgreenmail.auth.disabled
+        -Dgreenmail.hostname=0.0.0.0
+    ports:
+      - "3025:3025"
+      - "3143:3143"
+
+  clamav:
+    ports:
+      - "3310:3310"
+
+  backend:
+    environment:
+      MAIL_HOST: greenmail
+      MAIL_PORT: "3143"
+      MAIL_USERNAME: ci
+      MAIL_PASSWORD: ci
+      MAIL_FOLDER: INBOX
+      MAIL_SSL: "false"
+      MAIL_POLL_SECONDS: "2"
+      AUTH_MODE: demo
+      CLINEVO_API_KEY: smoke-secret
+      JOB_POLL_MS: "500"
+      JOB_RECOVERY_MS: "5000"
+      JOB_MAX_ATTEMPTS: "8"
+      JOB_RETRY_BASE_SECONDS: "2"
+      JOB_LEASE_SECONDS: "60"
+      MALWARE_SCAN_ENABLED: "true"
+      DOCUMENT_STORAGE_MODE: filesystem
+      DOCUMENT_RETENTION_DAYS: "0"
+    depends_on:
+      greenmail:
+        condition: service_started
