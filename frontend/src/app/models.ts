@@ -104,6 +104,7 @@ export interface FactOverride {
 export interface ReviewRequest {
   action: 'ACCEPT' | 'OVERRIDE';
   overrideCategory?: string;
+  overrideCategories?: Array<Classification['category']>;
   note?: string;
   reviewer: string;
   factOverrides: FactOverride[];
