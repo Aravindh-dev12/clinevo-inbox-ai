@@ -12,10 +12,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class InboxService {
+    private static final Set<String> VALID_CATEGORIES = Set.of("ICSR", "PQC", "MI", "NOT_RELEVANT");
+
     private final InboxMessageRepository repository;
     private final JdbcTemplate jdbc;
     private final AiProcessingService processing;
@@ -56,10 +61,10 @@ public class InboxService {
         if (!List.of("ACCEPT", "OVERRIDE").contains(normalized)) throw new IllegalArgumentException("action must be ACCEPT or OVERRIDE");
         String reviewer = reviewerIdentity.resolve(request.reviewer());
 
-        if ("OVERRIDE".equals(normalized) && request.overrideCategory() != null && !request.overrideCategory().isBlank()) {
-            String category = request.overrideCategory().trim().toUpperCase();
-            if (!List.of("ICSR", "PQC", "MI", "NOT_RELEVANT").contains(category)) throw new IllegalArgumentException("invalid overrideCategory");
-            insertReview(id, reviewer, "CATEGORY_OVERRIDE", "classification", null, category, request.note());
+        List<String> overrideCategories = resolveOverrideCategories(request);
+        if ("OVERRIDE".equals(normalized) && !overrideCategories.isEmpty()) {
+            insertReview(id, reviewer, "CATEGORY_OVERRIDE", "classification", null,
+                    String.join(",", overrideCategories), request.note());
         }
 
         for (FactOverride override : request.factOverrides()) {
@@ -70,10 +75,30 @@ public class InboxService {
 
         insertReview(id, reviewer, normalized, null, null, null, request.note());
         item.setStatus("ACCEPT".equals(normalized) ? "REVIEW_ACCEPTED" : "REVIEW_OVERRIDDEN");
-        audit(id, "REVIEW_" + normalized, "HUMAN", "reviewer=" + reviewer);
+        audit(id, "REVIEW_" + normalized, "HUMAN",
+                "reviewer=" + reviewer + (overrideCategories.isEmpty() ? "" : ", categories=" + String.join(",", overrideCategories)));
         InboxMessage saved = repository.save(item);
         metrics.recordReview(normalized, (System.nanoTime() - started) / 1_000_000);
         return saved;
+    }
+
+    private List<String> resolveOverrideCategories(ReviewRequest request) {
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String category : request.overrideCategories()) {
+            if (category == null || category.isBlank()) continue;
+            String value = category.trim().toUpperCase();
+            if (!VALID_CATEGORIES.contains(value)) throw new IllegalArgumentException("invalid overrideCategories value: " + category);
+            normalized.add(value);
+        }
+        if (normalized.isEmpty() && request.overrideCategory() != null && !request.overrideCategory().isBlank()) {
+            String legacy = request.overrideCategory().trim().toUpperCase();
+            if (!VALID_CATEGORIES.contains(legacy)) throw new IllegalArgumentException("invalid overrideCategory");
+            normalized.add(legacy);
+        }
+        if (normalized.contains("NOT_RELEVANT") && normalized.size() > 1) {
+            throw new IllegalArgumentException("NOT_RELEVANT cannot be combined with ICSR, PQC, or MI");
+        }
+        return new ArrayList<>(normalized);
     }
 
     private void insertReview(long id, String reviewer, String action, String field, String previous, String next, String note) {
