@@ -33,6 +33,54 @@ class StructuredLlmClient:
         if not self.enabled:
             return None
         system_prompt = PROMPT_PATH.read_text(encoding="utf-8")
+        payload = self._chat_json(system_prompt, source_text)
+        if payload is None:
+            return None
+        try:
+            return AiDecision.model_validate(payload)
+        except ValueError:
+            return None
+
+    def translate_pages(self, pages: list[str], source_language: str) -> list[str] | None:
+        """Translate all pages to English while preserving page boundaries.
+
+        The translation is auxiliary context only. Downstream provenance still has to
+        cite evidence that occurs in the original source page.
+        """
+        if not self.enabled or not pages:
+            return None
+        system_prompt = (
+            "You are a conservative medical-document translator. Translate every supplied page into English. "
+            "Preserve medication/product names, dose values, units, dates, negation, uncertainty, patient identifiers, "
+            "and reporter roles exactly. Do not add facts or interpretations. Return only JSON with this shape: "
+            '{"translations":[{"page":1,"text":"..."}]}. Include each input page exactly once and keep page numbers unchanged.'
+        )
+        source = "\n\n".join(
+            f"[SOURCE_LANGUAGE={source_language} PAGE={index}]\n{text}"
+            for index, text in enumerate(pages, start=1)
+        )
+        payload = self._chat_json(system_prompt, source)
+        if payload is None:
+            return None
+        translations = payload.get("translations")
+        if not isinstance(translations, list):
+            return None
+        by_page: dict[int, str] = {}
+        for item in translations:
+            if not isinstance(item, dict):
+                return None
+            page = item.get("page")
+            text = item.get("text")
+            if not isinstance(page, int) or not isinstance(text, str) or not text.strip():
+                return None
+            if page in by_page or page < 1 or page > len(pages):
+                return None
+            by_page[page] = text.strip()
+        if set(by_page) != set(range(1, len(pages) + 1)):
+            return None
+        return [by_page[index] for index in range(1, len(pages) + 1)]
+
+    def _chat_json(self, system_prompt: str, user_content: str) -> dict[str, Any] | None:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -42,14 +90,15 @@ class StructuredLlmClient:
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text},
+                {"role": "user", "content": user_content},
             ],
         }
         try:
             response = httpx.post(self.url, headers=headers, json=body, timeout=self.timeout)
             response.raise_for_status()
             content = _extract_content(response.json())
-            return AiDecision.model_validate_json(content)
+            parsed = json.loads(content)
+            return parsed if isinstance(parsed, dict) else None
         except (httpx.HTTPError, ValueError, KeyError, TypeError, json.JSONDecodeError):
             return None
 

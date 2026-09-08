@@ -1,6 +1,7 @@
 package com.clinevo.inbox.api;
 
 import com.clinevo.inbox.domain.InboxMessage;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -17,7 +18,8 @@ public record InboxDetailView(
     public record AttachmentView(Long id, String fileName, String mimeType, String pdfType,
                                  String detectedLanguage, BigDecimal ocrConfidence,
                                  Long processingMs, String processingStatus,
-                                 String malwareScanStatus, String storageProvider, String sha256) {}
+                                 String malwareScanStatus, String storageProvider, String sha256,
+                                 JsonNode translation, JsonNode tables, JsonNode images) {}
     public record FactView(Long id, String factGroup, String fieldName, String fieldValue,
                            BigDecimal confidence, String sourceType, String sourceName,
                            Integer sourcePage, String evidenceText) {}
