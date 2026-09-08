@@ -343,7 +343,11 @@ public class AiProcessingService {
                   (ATTACHMENT_SEQ.NEXTVAL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, messageId, fileName, mimeType, sha, attachment.originalSize(), stagedBytes,
                 rejectionReason, status, scanStatus, storageProvider, Instant.now());
-        if (status.startsWith("REJECTED")) audit(messageId, "ATTACHMENT_REJECTED", "SYSTEM", fileName + ": " + rejectionReason);
+        if (status.startsWith("REJECTED")) {
+            audit(messageId, "ATTACHMENT_REJECTED", "SYSTEM", fileName + ": " + rejectionReason);
+        } else if ("LOGGED_UNSUPPORTED".equals(status)) {
+            audit(messageId, "ATTACHMENT_UNSUPPORTED", "SYSTEM", fileName + ": mimeType=" + mimeType + "; retained as metadata only");
+        }
     }
 
     private void updateAttachmentResult(long attachmentId, JsonNode result) {
@@ -393,11 +397,39 @@ public class AiProcessingService {
                 Map.Entry<String, JsonNode> field = fields.next();
                 JsonNode valueNode = field.getValue();
                 JsonNode source = valueNode.path("source");
-                String value = valueNode.path("value").asText("Not stated");
-                if (source.isMissingNode() || source.isNull() || "Not stated".equalsIgnoreCase(value)) continue;
+                String value = valueNode.path("value").asText("Not stated").trim();
+                boolean notStated = value.isBlank() || "Not stated".equalsIgnoreCase(value);
+
+                if (notStated) {
+                    Long existing = jdbc.queryForObject(
+                            "SELECT COUNT(*) FROM EXTRACTED_FACT WHERE MESSAGE_ID=? AND FACT_GROUP=? AND FIELD_NAME=?",
+                            Long.class, messageId, group.getKey(), field.getKey());
+                    if (existing != null && existing > 0) continue;
+
+                    String fallbackSourceType = attachmentId == null ? "EMAIL" : "PDF";
+                    String fallbackSourceName = attachmentId == null ? "email:" + messageId : "attachment:" + attachmentId;
+                    jdbc.update("""
+                            INSERT INTO EXTRACTED_FACT
+                              (ID, MESSAGE_ID, ATTACHMENT_ID, FACT_GROUP, FIELD_NAME, FIELD_VALUE, CONFIDENCE,
+                               SOURCE_TYPE, SOURCE_NAME, SOURCE_PAGE, EVIDENCE_TEXT, CREATED_AT)
+                            VALUES
+                              (EXTRACTED_FACT_SEQ.NEXTVAL, ?, ?, ?, ?, 'Not stated', 0, ?, ?, NULL, NULL, ?)
+                            """,
+                            messageId, attachmentId, group.getKey(), field.getKey(), fallbackSourceType,
+                            fallbackSourceName, Instant.now());
+                    continue;
+                }
+
+                if (source.isMissingNode() || source.isNull()) continue;
                 String sourceType = source.path("source_type").asText(attachmentId == null ? "EMAIL" : "PDF").toUpperCase();
                 if (!Set.of("EMAIL", "PDF").contains(sourceType)) continue;
                 Long linkedAttachment = "PDF".equals(sourceType) ? attachmentId : null;
+
+                // A concrete sourced value supersedes a previously stored absence sentinel for this field.
+                jdbc.update("""
+                        DELETE FROM EXTRACTED_FACT
+                        WHERE MESSAGE_ID=? AND FACT_GROUP=? AND FIELD_NAME=? AND CONFIDENCE=0 AND EVIDENCE_TEXT IS NULL
+                        """, messageId, group.getKey(), field.getKey());
                 jdbc.update("""
                         INSERT INTO EXTRACTED_FACT
                           (ID, MESSAGE_ID, ATTACHMENT_ID, FACT_GROUP, FIELD_NAME, FIELD_VALUE, CONFIDENCE,
