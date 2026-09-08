@@ -50,3 +50,23 @@ def test_mi_question_is_extracted_with_page():
     question = facts["medical_information"]["question"]
     assert question.value.endswith("?")
     assert question.source.page == 2
+
+
+def test_icsr_narrative_is_source_grounded_with_provenance():
+    text = "Patient P9 is a 51-year-old female taking Product Novera 20 mg. Nurse Lee reported that the patient developed dizziness and recovered later."
+    facts = extract_facts([text], "case.pdf")
+    narrative = facts["narrative"]["case_narrative"]
+    assert narrative.value != "Not stated"
+    assert "dizziness" in narrative.value.lower()
+    assert narrative.source is not None
+    assert narrative.source.page == 1
+    assert "dizziness" in narrative.source.evidence.lower()
+
+
+def test_narrative_is_not_stated_without_nonnegated_reaction():
+    text = "Patient P10 used Product Novera 20 mg. Physician reported no rash and no dizziness."
+    facts = extract_facts([text], "case.pdf")
+    narrative = facts["narrative"]["case_narrative"]
+    assert narrative.value == "Not stated"
+    assert narrative.confidence == 0.0
+    assert narrative.source is None
