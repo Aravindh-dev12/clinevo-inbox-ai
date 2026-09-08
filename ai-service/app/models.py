@@ -5,6 +5,9 @@ from pydantic import BaseModel, Field
 
 Category = Literal["ICSR", "PQC", "MI", "NOT_RELEVANT"]
 PdfType = Literal["DIGITAL", "SCANNED_OR_HANDWRITTEN", "PUBLISHED_ARTICLE", "NON_ENGLISH"]
+TranslationStatus = Literal["NOT_REQUIRED", "TRANSLATED", "PARTIAL", "UNAVAILABLE"]
+TranslationMethod = Literal["NOT_REQUIRED", "LLM", "SYNTHETIC_RULES", "UNAVAILABLE"]
+ImageDescriptionMethod = Literal["OCR_TEXT", "METADATA_ONLY"]
 
 
 class SourceRef(BaseModel):
@@ -31,10 +34,32 @@ class TableData(BaseModel):
     rows: list[list[str | None]]
 
 
+class TranslationPage(BaseModel):
+    page: int
+    original_text: str
+    translated_text: str
+
+
+class TranslationInfo(BaseModel):
+    applied: bool = False
+    status: TranslationStatus = "NOT_REQUIRED"
+    source_language: str = "unknown"
+    target_language: str = "en"
+    method: TranslationMethod = "NOT_REQUIRED"
+    rationale: str
+    requires_human_review: bool = False
+    pages: list[TranslationPage] = Field(default_factory=list)
+
+
 class ImageFinding(BaseModel):
     page: int
     description: str
     requires_human_review: bool = True
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    method: ImageDescriptionMethod = "METADATA_ONLY"
+    evidence_text: str | None = None
+    width: int | None = None
+    height: int | None = None
 
 
 class AiDecision(BaseModel):
@@ -50,6 +75,7 @@ class ProcessingResult(BaseModel):
     ocr_confidence: float | None = None
     classifications: list[Classification]
     summary: str
+    translation: TranslationInfo
     tables: list[TableData] = Field(default_factory=list)
     images: list[ImageFinding] = Field(default_factory=list)
     extracted_facts: dict[str, dict[str, ExtractedValue]] = Field(default_factory=dict)
