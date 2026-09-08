@@ -2,6 +2,8 @@ package com.clinevo.inbox.service;
 
 import com.clinevo.inbox.api.InboxDetailView;
 import com.clinevo.inbox.domain.InboxMessage;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +14,8 @@ import java.util.List;
 
 @Service
 public class ReviewViewService {
+    private static final ObjectMapper JSON = new ObjectMapper();
+
     private final JdbcTemplate jdbc;
     private final InboxService inbox;
 
@@ -31,13 +35,15 @@ public class ReviewViewService {
 
         List<InboxDetailView.AttachmentView> attachments = jdbc.query("""
                 SELECT ID, FILE_NAME, MIME_TYPE, PDF_TYPE, DETECTED_LANGUAGE, OCR_CONFIDENCE,
-                       PROCESSING_MS, PROCESSING_STATUS, MALWARE_SCAN_STATUS, STORAGE_PROVIDER, SHA256
+                       PROCESSING_MS, PROCESSING_STATUS, MALWARE_SCAN_STATUS, STORAGE_PROVIDER, SHA256,
+                       TRANSLATION_JSON, TABLES_JSON, IMAGES_JSON
                 FROM ATTACHMENT WHERE MESSAGE_ID = ? ORDER BY ID
                 """, (rs, row) -> new InboxDetailView.AttachmentView(
                 rs.getLong("ID"), rs.getString("FILE_NAME"), rs.getString("MIME_TYPE"), rs.getString("PDF_TYPE"),
                 rs.getString("DETECTED_LANGUAGE"), rs.getBigDecimal("OCR_CONFIDENCE"),
                 nullableLong(rs.getObject("PROCESSING_MS")), rs.getString("PROCESSING_STATUS"),
-                rs.getString("MALWARE_SCAN_STATUS"), rs.getString("STORAGE_PROVIDER"), rs.getString("SHA256")), id);
+                rs.getString("MALWARE_SCAN_STATUS"), rs.getString("STORAGE_PROVIDER"), rs.getString("SHA256"),
+                jsonNode(rs.getObject("TRANSLATION_JSON")), jsonNode(rs.getObject("TABLES_JSON")), jsonNode(rs.getObject("IMAGES_JSON"))), id);
 
         List<InboxDetailView.FactView> facts = jdbc.query("""
                 SELECT ID, FACT_GROUP, FIELD_NAME, FIELD_VALUE, CONFIDENCE, SOURCE_TYPE, SOURCE_NAME, SOURCE_PAGE, EVIDENCE_TEXT
@@ -68,6 +74,17 @@ public class ReviewViewService {
 
     private static Long nullableLong(Object value) { return value == null ? null : ((Number) value).longValue(); }
     private static Integer nullableInteger(Object value) { return value == null ? null : ((Number) value).intValue(); }
+
+    private static JsonNode jsonNode(Object value) throws SQLException {
+        String text = clobText(value);
+        if (text == null || text.isBlank()) return null;
+        try {
+            return JSON.readTree(text);
+        } catch (Exception ex) {
+            throw new SQLException("Invalid persisted document-enrichment JSON", ex);
+        }
+    }
+
     private static String clobText(Object value) throws SQLException {
         if (value == null) return null;
         if (value instanceof Clob clob) return clob.getSubString(1, (int) clob.length());
