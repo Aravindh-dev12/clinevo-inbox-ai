@@ -63,6 +63,7 @@
         <h3>Attachments</h3>
         <div class="attachment" *ngFor="let a of d.attachments">
           <strong>{{ a.fileName }}</strong>
+          <a [href]="attachmentUrl(d.message.id, a.id)" target="_blank" rel="noopener">Open PDF source</a>
           <span>{{ a.pdfType || a.mimeType || 'unknown type' }}</span>
           <span>language {{ a.detectedLanguage || 'unknown' }}</span>
           <span *ngIf="a.ocrConfidence != null">OCR {{ confidence(a.ocrConfidence) }}</span>
