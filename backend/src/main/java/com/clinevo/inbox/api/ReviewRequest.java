@@ -16,4 +16,15 @@ public record ReviewRequest(
         overrideCategories = overrideCategories == null ? List.of() : List.copyOf(overrideCategories);
         factOverrides = factOverrides == null ? List.of() : List.copyOf(factOverrides);
     }
+
+    // Preserve the original five-argument constructor used by existing tests and callers.
+    public ReviewRequest(
+            String action,
+            String overrideCategory,
+            String note,
+            String reviewer,
+            List<FactOverride> factOverrides
+    ) {
+        this(action, overrideCategory, List.of(), note, reviewer, factOverrides);
+    }
 }
