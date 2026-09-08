@@ -349,13 +349,18 @@ public class AiProcessingService {
     private void updateAttachmentResult(long attachmentId, JsonNode result) {
         jdbc.update("""
                 UPDATE ATTACHMENT SET PDF_TYPE=?, DETECTED_LANGUAGE=?, OCR_CONFIDENCE=?, PROCESSING_MS=?,
+                    TRANSLATION_JSON=?, TABLES_JSON=?, IMAGES_JSON=?,
                     PROCESSING_STATUS='PROCESSED', REJECTION_REASON=NULL
                 WHERE ID=?
                 """,
                 result.path("pdf_type").asText("UNKNOWN"),
                 result.path("detected_language").asText("unknown"),
                 result.path("ocr_confidence").isNumber() ? result.path("ocr_confidence").asDouble() : null,
-                result.path("processing_ms").asLong(0), attachmentId);
+                result.path("processing_ms").asLong(0),
+                result.has("translation") ? result.get("translation").toString() : null,
+                result.has("tables") ? result.get("tables").toString() : "[]",
+                result.has("images") ? result.get("images").toString() : "[]",
+                attachmentId);
     }
 
     private void collectClassifications(Map<String, ClassificationCandidate> target, JsonNode result) {
