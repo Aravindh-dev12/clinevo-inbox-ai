@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -27,7 +28,7 @@ class InboxServiceTest {
     @Test
     void acceptReviewIsPersistedAndAudited() {
         InboxMessage message = fixture();
-        InboxMessage reviewed = service.review(message.getId(), new ReviewRequest("ACCEPT", null, "verified", "reviewer-a", List.of()));
+        InboxMessage reviewed = service.review(message.getId(), new ReviewRequest("ACCEPT", null, List.of(), "verified", "reviewer-a", List.of()));
         assertThat(reviewed.getStatus()).isEqualTo("REVIEW_ACCEPTED");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM REVIEW_ACTION WHERE MESSAGE_ID = ?", Long.class, message.getId())).isEqualTo(1L);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM AUDIT_EVENT WHERE MESSAGE_ID = ?", Long.class, message.getId())).isEqualTo(1L);
@@ -39,9 +40,30 @@ class InboxServiceTest {
         jdbc.update("INSERT INTO EXTRACTED_FACT (ID,MESSAGE_ID,FACT_GROUP,FIELD_NAME,FIELD_VALUE,CONFIDENCE,SOURCE_TYPE,SOURCE_NAME,SOURCE_PAGE,EVIDENCE_TEXT,CREATED_AT) VALUES (EXTRACTED_FACT_SEQ.NEXTVAL,?,?,?,?,?,?,?,?,?,?)",
                 message.getId(), "patient", "age", "44", .90, "PDF", "case.pdf", 2, "44-year-old", Instant.now());
         Long factId = jdbc.queryForObject("SELECT ID FROM EXTRACTED_FACT WHERE MESSAGE_ID = ?", Long.class, message.getId());
-        service.review(message.getId(), new ReviewRequest("OVERRIDE", "ICSR", "source says 45", "reviewer-b", List.of(new FactOverride(factId, "45"))));
+        service.review(message.getId(), new ReviewRequest("OVERRIDE", "ICSR", List.of(), "source says 45", "reviewer-b", List.of(new FactOverride(factId, "45"))));
         assertThat(jdbc.queryForObject("SELECT FIELD_VALUE FROM EXTRACTED_FACT WHERE ID = ?", String.class, factId)).isEqualTo("45");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM REVIEW_ACTION WHERE MESSAGE_ID = ?", Long.class, message.getId())).isEqualTo(3L);
+    }
+
+    @Test
+    void multiLabelCategoryOverrideIsStoredAsReviewerDecision() {
+        InboxMessage message = fixture();
+        service.review(message.getId(), new ReviewRequest(
+                "OVERRIDE", null, List.of("ICSR", "PQC", "ICSR"), "dual case", "reviewer-c", List.of()));
+
+        String override = jdbc.queryForObject(
+                "SELECT NEW_VALUE FROM REVIEW_ACTION WHERE MESSAGE_ID = ? AND ACTION_TYPE = 'CATEGORY_OVERRIDE'",
+                String.class, message.getId());
+        assertThat(override).isEqualTo("ICSR,PQC");
+    }
+
+    @Test
+    void notRelevantCannotBeCombinedWithOtherOverrideLabels() {
+        InboxMessage message = fixture();
+        assertThatThrownBy(() -> service.review(message.getId(), new ReviewRequest(
+                "OVERRIDE", null, List.of("NOT_RELEVANT", "ICSR"), null, "reviewer-d", List.of())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("NOT_RELEVANT");
     }
 
     private InboxMessage fixture() {

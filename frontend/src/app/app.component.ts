@@ -3,7 +3,7 @@ import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
 import { LiteratureScreeningComponent } from './literature-screening.component';
-import { FactOverride, InboxDetail, InboxMessage } from './models';
+import { Classification, FactOverride, InboxDetail, InboxMessage } from './models';
 
 @Component({
   selector: 'app-root',
@@ -18,7 +18,8 @@ export class AppComponent implements OnInit {
   loading = false;
   error = '';
   reviewer = 'candidate-reviewer';
-  overrideCategory = '';
+  overrideCategories: Array<Classification['category']> = [];
+  readonly classificationOptions: Array<Classification['category']> = ['ICSR', 'PQC', 'MI', 'NOT_RELEVANT'];
   note = '';
   private readonly originalValues = new Map<number, string>();
 
@@ -51,7 +52,7 @@ export class AppComponent implements OnInit {
         this.selected = detail;
         this.originalValues.clear();
         for (const fact of detail.facts) this.originalValues.set(fact.id, fact.fieldValue ?? '');
-        this.overrideCategory = '';
+        this.overrideCategories = detail.classifications.map(item => item.category);
         this.note = '';
       },
       error: () => this.error = 'Could not load item detail.'
@@ -66,15 +67,37 @@ export class AppComponent implements OnInit {
     return page ? `${name ?? 'PDF'} · page ${page}` : (name ?? 'Email');
   }
 
+  isOverrideCategorySelected(category: Classification['category']): boolean {
+    return this.overrideCategories.includes(category);
+  }
+
+  toggleOverrideCategory(category: Classification['category'], checked: boolean): void {
+    if (checked) {
+      if (category === 'NOT_RELEVANT') {
+        this.overrideCategories = ['NOT_RELEVANT'];
+        return;
+      }
+      this.overrideCategories = this.overrideCategories.filter(item => item !== 'NOT_RELEVANT');
+      if (!this.overrideCategories.includes(category)) this.overrideCategories = [...this.overrideCategories, category];
+      return;
+    }
+    this.overrideCategories = this.overrideCategories.filter(item => item !== category);
+  }
+
   submit(action: 'ACCEPT' | 'OVERRIDE'): void {
     if (!this.selected || !this.reviewer.trim()) return;
     const factOverrides: FactOverride[] = this.selected.facts
       .filter(f => (f.fieldValue ?? '') !== (this.originalValues.get(f.id) ?? ''))
       .map(f => ({ factId: f.id, newValue: f.fieldValue ?? '' }));
 
+    if (action === 'OVERRIDE' && this.overrideCategories.length === 0 && factOverrides.length === 0) {
+      this.error = 'Select at least one classification or edit a field before overriding.';
+      return;
+    }
+
     this.api.review(this.selected.message.id, {
       action,
-      overrideCategory: action === 'OVERRIDE' ? this.overrideCategory || undefined : undefined,
+      overrideCategories: action === 'OVERRIDE' && this.overrideCategories.length > 0 ? this.overrideCategories : undefined,
       note: this.note || undefined,
       reviewer: this.reviewer.trim(),
       factOverrides

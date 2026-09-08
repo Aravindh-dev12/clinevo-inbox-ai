@@ -124,15 +124,17 @@
         <h3>Human review</h3>
         <div class="review-grid">
           <label>Reviewer<input [(ngModel)]="reviewer" /></label>
-          <label>Override category
-            <select [(ngModel)]="overrideCategory">
-              <option value="">Keep AI categories</option>
-              <option value="ICSR">ICSR</option>
-              <option value="PQC">PQC</option>
-              <option value="MI">MI</option>
-              <option value="NOT_RELEVANT">Not Relevant</option>
-            </select>
-          </label>
+          <fieldset>
+            <legend>Override classifications (multi-label)</legend>
+            <label *ngFor="let category of classificationOptions">
+              <input
+                type="checkbox"
+                [checked]="isOverrideCategorySelected(category)"
+                (change)="toggleOverrideCategory(category, $any($event.target).checked)" />
+              {{ category === 'NOT_RELEVANT' ? 'Not Relevant' : category }}
+            </label>
+            <small>Not Relevant is mutually exclusive with ICSR, PQC, and MI.</small>
+          </fieldset>
           <label class="wide">Review note<textarea [(ngModel)]="note" rows="3" placeholder="Reason for override or reviewer note"></textarea></label>
         </div>
         <div class="actions">
