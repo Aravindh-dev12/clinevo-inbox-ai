@@ -1,6 +1,7 @@
 package com.clinevo.inbox.service;
 
 import com.clinevo.inbox.api.InboxDetailView;
+import com.clinevo.inbox.document.OriginalDocumentStore;
 import com.clinevo.inbox.domain.InboxMessage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,10 +19,12 @@ public class ReviewViewService {
 
     private final JdbcTemplate jdbc;
     private final InboxService inbox;
+    private final OriginalDocumentStore documentStore;
 
-    public ReviewViewService(JdbcTemplate jdbc, InboxService inbox) {
+    public ReviewViewService(JdbcTemplate jdbc, InboxService inbox, OriginalDocumentStore documentStore) {
         this.jdbc = jdbc;
         this.inbox = inbox;
+        this.documentStore = documentStore;
     }
 
     @Transactional(readOnly = true)
@@ -71,6 +74,32 @@ public class ReviewViewService {
 
         return new InboxDetailView(message, classifications, attachments, facts, actions, jobs);
     }
+
+    @Transactional(readOnly = true)
+    public AttachmentContent attachment(long messageId, long attachmentId) {
+        inbox.get(messageId);
+        List<AttachmentContent> matches = jdbc.query("""
+                SELECT FILE_NAME, MIME_TYPE, CONTENT_BLOB, STORAGE_KEY
+                FROM ATTACHMENT
+                WHERE MESSAGE_ID = ? AND ID = ?
+                """, (rs, row) -> {
+            byte[] content = rs.getBytes("CONTENT_BLOB");
+            String storageKey = rs.getString("STORAGE_KEY");
+            if ((content == null || content.length == 0) && storageKey != null && !storageKey.isBlank()) {
+                content = documentStore.load(storageKey);
+            }
+            return new AttachmentContent(rs.getString("FILE_NAME"), rs.getString("MIME_TYPE"), content);
+        }, messageId, attachmentId);
+
+        if (matches.isEmpty()) throw new IllegalArgumentException("Attachment not found: " + attachmentId);
+        AttachmentContent attachment = matches.getFirst();
+        if (attachment.content() == null || attachment.content().length == 0) {
+            throw new IllegalStateException("Attachment content is unavailable");
+        }
+        return attachment;
+    }
+
+    public record AttachmentContent(String fileName, String mimeType, byte[] content) {}
 
     private static Long nullableLong(Object value) { return value == null ? null : ((Number) value).longValue(); }
     private static Integer nullableInteger(Object value) { return value == null ? null : ((Number) value).intValue(); }

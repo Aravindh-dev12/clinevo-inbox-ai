@@ -11,6 +11,7 @@ export class ApiService {
   constructor(private readonly http: HttpClient) {}
   listInbox(): Observable<InboxMessage[]> { return this.http.get<InboxMessage[]>(`${this.baseUrl}/inbox`); }
   getDetail(id: number): Observable<InboxDetail> { return this.http.get<InboxDetail>(`${this.baseUrl}/inbox/${id}/detail`); }
+  attachmentUrl(messageId: number, attachmentId: number): string { return `${this.baseUrl}/inbox/${messageId}/attachments/${attachmentId}`; }
   review(id: number, request: ReviewRequest): Observable<InboxMessage> {
     return this.http.post<InboxMessage>(`${this.baseUrl}/inbox/${id}/review`, request, { headers: this.writeHeaders() });
   }

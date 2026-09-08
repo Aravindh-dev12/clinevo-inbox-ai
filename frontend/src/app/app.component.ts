@@ -67,6 +67,10 @@ export class AppComponent implements OnInit {
     return page ? `${name ?? 'PDF'} · page ${page}` : (name ?? 'Email');
   }
 
+  attachmentUrl(messageId: number, attachmentId: number): string {
+    return this.api.attachmentUrl(messageId, attachmentId);
+  }
+
   isOverrideCategorySelected(category: Classification['category']): boolean {
     return this.overrideCategories.includes(category);
   }
