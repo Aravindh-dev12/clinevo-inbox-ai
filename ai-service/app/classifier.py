@@ -176,6 +176,48 @@ def _question(pages: list[str]) -> Located | None:
     return None
 
 
+def _narrative(pages: list[str]) -> Located | None:
+    """Return a source-grounded case narrative excerpt without generating or inferring text."""
+    for page_number, text in enumerate(pages, start=1):
+        sentence_matches = list(re.finditer(r"[^\n.!?]+(?:[.!?]|$)", text))
+        for index, sentence_match in enumerate(sentence_matches):
+            sentence = sentence_match.group(0).strip()
+            if not sentence:
+                continue
+            folded_sentence = _fold(sentence)
+            reaction_found = False
+            for term in REACTION_TERMS:
+                target = _fold(term)
+                for hit in re.finditer(re.escape(target), folded_sentence):
+                    if not _is_negated(folded_sentence, hit.start()):
+                        reaction_found = True
+                        break
+                if reaction_found:
+                    break
+            if not reaction_found:
+                continue
+
+            # Include one immediately preceding sentence when it carries patient/product/reporter context.
+            selected = sentence
+            start = sentence_match.start()
+            if index > 0:
+                previous_match = sentence_matches[index - 1]
+                previous = previous_match.group(0).strip()
+                previous_folded = _fold(previous)
+                has_case_context = bool(
+                    re.search(r"\b(?:patient|paciente|male|female|mujer|hombre|woman|man|\d{1,3}\s*[- ]?year[- ]?old)\b", previous_folded)
+                    or _product_name(previous) is not None
+                    or any(_fold(term) in previous_folded for term in REPORTER_TERMS)
+                )
+                if previous and has_case_context:
+                    selected = f"{previous} {sentence}"
+                    start = previous_match.start()
+
+            selected = " ".join(selected.split())
+            return Located(selected, page_number, _context(text, start, sentence_match.end(), radius=80))
+    return None
+
+
 def extract_facts(pages: list[str], source_name: str) -> dict[str, dict[str, ExtractedValue]]:
     age = _regex(pages, r"\b(\d{1,3})\s*[- ]?year[- ]?old\b") or _regex(pages, r"\bage\s*[:\-]?\s*(\d{1,3})\b")
     sex = _term(pages, ("female", "male", "woman", "man", "mujer", "hombre"), value_map={"woman":"female","mujer":"female","man":"male","hombre":"male"})
@@ -190,6 +232,7 @@ def extract_facts(pages: list[str], source_name: str) -> dict[str, dict[str, Ext
     reaction = _term(pages, REACTION_TERMS)
     outcome = _term(pages, ("recovered", "resolved", "recovering", "fatal", "unknown"))
     seriousness = _term(pages, ("death", "life-threatening", "hospitalized", "hospitalised", "hospitalization"))
+    narrative = _narrative(pages)
     pqc_issue = _term(pages, PQC_TERMS)
     photo = _term(pages, ("photo", "image", "photograph"), value_map={"photo":"yes","image":"yes","photograph":"yes"})
     question = _question(pages)
@@ -219,6 +262,9 @@ def extract_facts(pages: list[str], source_name: str) -> dict[str, dict[str, Ext
         },
         "severity": {
             "seriousness": _value(seriousness, 0.94, source_name),
+        },
+        "narrative": {
+            "case_narrative": _value(narrative, 0.90, source_name),
         },
         "quality_complaint": {
             "issue": _value(pqc_issue, 0.90, source_name),
