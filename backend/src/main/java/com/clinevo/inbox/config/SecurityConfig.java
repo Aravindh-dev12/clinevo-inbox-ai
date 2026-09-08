@@ -1,5 +1,6 @@
 package com.clinevo.inbox.config;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -32,7 +33,10 @@ public class SecurityConfig {
 
     @Bean
     @ConditionalOnProperty(name = "clinevo.auth.mode", havingValue = "demo", matchIfMissing = true)
-    SecurityFilterChain demoSecurity(HttpSecurity http, CorsConfigurationSource cors) throws Exception {
+    SecurityFilterChain demoSecurity(
+            HttpSecurity http,
+            @Qualifier("corsConfigurationSource") CorsConfigurationSource cors
+    ) throws Exception {
         return common(http, cors)
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
                 .build();
@@ -42,7 +46,7 @@ public class SecurityConfig {
     @ConditionalOnProperty(name = "clinevo.auth.mode", havingValue = "oidc")
     SecurityFilterChain oidcSecurity(
             HttpSecurity http,
-            CorsConfigurationSource cors,
+            @Qualifier("corsConfigurationSource") CorsConfigurationSource cors,
             JwtAuthenticationConverter jwtAuthenticationConverter,
             SecurityErrorHandler errors
     ) throws Exception {
