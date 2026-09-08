@@ -67,6 +67,42 @@
           <span>language {{ a.detectedLanguage || 'unknown' }}</span>
           <span *ngIf="a.ocrConfidence != null">OCR {{ confidence(a.ocrConfidence) }}</span>
           <span>{{ a.processingMs || 0 }} ms</span>
+          <span *ngIf="a.malwareScanStatus">scan {{ a.malwareScanStatus }}</span>
+          <span *ngIf="a.storageProvider">source {{ a.storageProvider }}</span>
+
+          <details *ngIf="a.translation && a.translation.status !== 'NOT_REQUIRED'">
+            <summary>Translation · {{ a.translation.status }} · {{ a.translation.method }}</summary>
+            <p>{{ a.translation.rationale }}</p>
+            <div class="muted" *ngIf="a.translation.requires_human_review">Human verification of the translation is required before relying on it.</div>
+            <div *ngFor="let page of a.translation.pages">
+              <strong>Page {{ page.page }} · original {{ a.translation.source_language }}</strong>
+              <pre>{{ page.original_text || '(no extracted source text)' }}</pre>
+              <strong>English translation</strong>
+              <pre>{{ page.translated_text || '(translation unavailable — review original source)' }}</pre>
+            </div>
+          </details>
+
+          <details *ngIf="a.tables && a.tables.length">
+            <summary>Structured tables · {{ a.tables.length }}</summary>
+            <div *ngFor="let table of a.tables">
+              <strong>Page {{ table.page }}</strong>
+              <table>
+                <tr *ngFor="let row of table.rows">
+                  <td *ngFor="let cell of row">{{ cell || '—' }}</td>
+                </tr>
+              </table>
+            </div>
+          </details>
+
+          <details *ngIf="a.images && a.images.length">
+            <summary>Embedded visuals · {{ a.images.length }} requiring review</summary>
+            <div class="audit" *ngFor="let image of a.images">
+              <strong>Page {{ image.page }} · {{ image.method }} · {{ confidence(image.confidence) }}</strong>
+              <div>{{ image.description }}</div>
+              <div class="muted" *ngIf="image.evidence_text">Machine-readable image text: {{ image.evidence_text }}</div>
+              <div class="muted" *ngIf="image.requires_human_review">Human visual review required.</div>
+            </div>
+          </details>
         </div>
       </section>
 
