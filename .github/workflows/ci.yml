@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ai-service:
     runs-on: ubuntu-latest
@@ -101,5 +105,49 @@ jobs:
         with:
           name: full-stack-evidence
           path: artifacts
-          if-no-files-found: warn
+          if-no-files-found: error
+          retention-days: 14
+
+  submission-package:
+    needs: [assignment-evidence, stack-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: assignment-sample-outputs
+          path: submission/assignment-evidence
+      - uses: actions/download-artifact@v4
+        with:
+          name: full-stack-evidence
+          path: submission/full-stack-evidence
+      - name: Assemble reviewer-ready submission package
+        run: |
+          test -f submission/assignment-evidence/samples/outputs/summary.json
+          test -f submission/assignment-evidence/samples/outputs/batch_report.csv
+          test -f submission/full-stack-evidence/ui/review-workbench.png
+          mkdir -p submission/documentation
+          cp README.md submission/documentation/
+          cp docs/ARCHITECTURE.md docs/WRITEUP.md docs/TESTING.md docs/DEMO_WALKTHROUGH.md docs/FUTURE_READY_IDEAS.md submission/documentation/
+          cat > submission/SUBMISSION_MANIFEST.md <<EOF
+          # Clinevo assignment submission evidence
+
+          - Commit: ${GITHUB_SHA}
+          - Synthetic data only
+          - Service/unit/build checks: passed before this packaging job
+          - Assignment batch: see \`assignment-evidence/samples/outputs/\`
+          - Measured timings: \`assignment-evidence/samples/outputs/batch_report.csv\`
+          - Browser-rendered UI evidence: \`full-stack-evidence/ui/review-workbench.png\`
+          - Integrated stack status: \`full-stack-evidence/compose-status.json\` (or text fallback)
+          - Architecture/write-up/testing/walkthrough: \`documentation/\`
+
+          This artifact is evidence for the candidate prototype. It is not a validated pharmacovigilance production release.
+          EOF
+          find submission -maxdepth 4 -type f -print | sort
+      - name: Upload complete submission package
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinevo-assignment-submission-package
+          path: submission
+          if-no-files-found: error
           retention-days: 14
