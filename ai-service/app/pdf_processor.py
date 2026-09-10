@@ -201,9 +201,24 @@ def _extract_images(data: bytes) -> list[ImageFinding]:
     return findings
 
 
+def _ensure_sentence_ending(value: str) -> str:
+    value = value.strip()
+    if not value or value.endswith((".", "!", "?")):
+        return value
+    return f"{value}."
+
+
+def _summary_sentence_count(value: str) -> int:
+    return len([sentence for sentence in re.split(r"(?<=[.!?])\s+", value.strip()) if sentence.strip()])
+
+
 def _summary(text: str, classifications: list) -> str:
     cleaned = " ".join(text.split())
-    sentence_candidates = [s.strip() for s in re.split(r"(?<=[.!?])\s+", cleaned) if len(s.strip()) > 20]
+    sentence_candidates = [
+        _ensure_sentence_ending(sentence)
+        for sentence in re.split(r"(?<=[.!?])\s+", cleaned)
+        if len(sentence.strip()) > 20
+    ]
     selected = sentence_candidates[:7]
     labels = ", ".join(item.category for item in classifications)
     selected.extend([
@@ -361,6 +376,8 @@ def process_pdf(file_name: str, data: bytes, email_text: str = "") -> Processing
     llm_decision = llm.decide(_source_for_llm(file_name, analysis_pages, email_text, translation))
     if llm_decision is not None:
         decision = validate_provenance(llm_decision, file_name=file_name, pages=analysis_pages, email_text=email_text)
+        if not 10 <= _summary_sentence_count(decision.summary) <= 15:
+            decision.summary = _summary(translated_text or analysis_text, decision.classifications)
 
     processing_ms = int((time.perf_counter() - started) * 1000)
     return ProcessingResult(
