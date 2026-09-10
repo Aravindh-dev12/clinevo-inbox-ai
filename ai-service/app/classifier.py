@@ -7,28 +7,42 @@ from dataclasses import dataclass
 from .models import Classification, ExtractedValue, SourceRef
 
 PQC_TERMS = (
-    "broken seal", "wrong color", "wrong colour", "contamination", "contaminated",
-    "damaged packaging", "counterfeit", "cracked", "leaking", "leaked", "defect", "defective",
-    "sello roto", "color incorrecto", "emballage endommagé", "fissuré",
+    "broken seal", "seal was broken", "broken foil seal", "wrong color", "wrong colour",
+    "unusual color", "unusual colour", "darker than expected", "contamination", "contaminated",
+    "damaged packaging", "damaged", "counterfeit", "cracked", "leaking", "leaked", "defect", "defective",
+    "would not click", "sello roto", "color incorrecto", "emballage endommagé", "fissuré",
 )
 REACTION_TERMS = (
     "anaphylaxis", "life-threatening", "hospitalized", "hospitalised", "hospitalization",
-    "rash", "nausea", "vomiting", "dizziness", "headache", "swelling", "fever", "death",
+    "rash", "nausea", "vomiting", "dizziness", "headache", "swelling", "redness", "itching",
+    "diarrhea", "diarrhoea", "syncope", "abdominal pain", "pain", "fever", "death",
     "erupción", "picor", "mareo", "vómitos", "douleur", "gonflement",
 )
 REPORTER_TERMS = (
-    "doctor", "physician", "nurse", "patient", "caregiver", "pharmacist", "reported", "reporter",
-    "médico", "medico", "enfermera", "paciente", "farmacéutico", "pharmacien", "médecin", "patient",
+    "doctor", "physician", "nurse", "patient", "caregiver", "pharmacist", "clinician", "clinicians",
+    "reported", "reporter", "self-reported", "reporting",
+    "médico", "medico", "enfermera", "paciente", "farmacéutico", "pharmacien", "médecin",
 )
 MI_TERMS = (
     "dose", "dosing", "how to take", "interaction", "can i", "should i", "what is", "how often",
-    "puede", "dosis", "interacción", "interaction", "peut-il", "comment prendre",
+    "dose adjustment", "taken with food", "puede", "dosis", "interacción", "interaction", "peut-il", "comment prendre",
 )
 NEGATION_WORDS = ("no", "not", "without", "denies", "denied", "aucun", "aucune", "sans", "sin", "ningún", "ninguna")
 ROUTE_TERMS = ("oral", "orally", "intravenous", "iv", "subcutaneous", "intramuscular", "topical", "por vía oral")
 COUNTRIES = (
     "India", "United Kingdom", "UK", "Canada", "Australia", "Ireland", "Singapore", "Spain",
-    "New Zealand", "France", "España", "France",
+    "New Zealand", "France", "España",
+)
+_PRODUCT_STOPWORDS = {
+    "quality", "complaint", "information", "request", "safety", "report", "case", "device", "adverse",
+    "name", "was", "were", "not", "provided", "unknown", "unspecified", "missing", "suspect",
+}
+_PRODUCT_PATTERNS = (
+    r"\b(?:product|drug|medicine|medication|producto|produit)\s*[:\-]?\s*([A-Za-z][A-Za-z0-9\-]{2,})\b",
+    r"\b([A-Za-z][A-Za-z0-9\-]{2,})\s+\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b",
+    r"\b([A-Za-z][A-Za-z0-9\-]{2,})\s+(?:tablets?|capsules?|gel|syringe|injector|autoinjector|pen)\b",
+    r"\b(?:first|next|last)\s+([A-Za-z][A-Za-z0-9\-]{2,})\s+dose\b",
+    r"\b(?:started|received|took|taking|used|using)\s+(?:(?:a|an|the)\s+)?([A-Za-z][A-Za-z0-9\-]{2,})\b",
 )
 
 
@@ -51,8 +65,13 @@ def _context(text: str, start: int, end: int, radius: int = 55) -> str:
 
 
 def _is_negated(text: str, start: int) -> bool:
-    prefix = _fold(text[max(0, start - 35):start])
-    return bool(re.search(r"\b(?:" + "|".join(re.escape(_fold(x)) for x in NEGATION_WORDS) + r")\b(?:\W+\w+){0,3}\W*$", prefix))
+    # Keep negation local to the same sentence/clause, but allow enough tokens for
+    # phrases such as "No adverse event or product defect was reported".
+    prefix = _fold(text[max(0, start - 100):start])
+    boundary = max(prefix.rfind("."), prefix.rfind(";"), prefix.rfind("!"), prefix.rfind("?"), prefix.rfind("\n"))
+    if boundary >= 0:
+        prefix = prefix[boundary + 1:]
+    return bool(re.search(r"\b(?:" + "|".join(re.escape(_fold(x)) for x in NEGATION_WORDS) + r")\b(?:\W+\w+){0,7}\W*$", prefix))
 
 
 def _nonnegated_terms(text: str, terms: tuple[str, ...]) -> list[str]:
@@ -67,16 +86,30 @@ def _nonnegated_terms(text: str, terms: tuple[str, ...]) -> list[str]:
     return hits
 
 
-def _product_name(text: str) -> str | None:
-    patterns = (
-        r"\b(?:product|drug|medicine|medication|producto|produit)\s*[:\-]?\s*([A-Z][A-Za-z0-9\-]{2,})\b",
-        r"\b([A-Z][A-Za-z0-9\-]{2,})\s+\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
+def _product_match(text: str) -> tuple[str, int, int] | None:
+    for pattern in _PRODUCT_PATTERNS:
+        for match in re.finditer(pattern, text, re.I):
+            candidate = match.group(1).strip()
+            if _fold(candidate) in _PRODUCT_STOPWORDS:
+                continue
+            return candidate, match.start(1), match.end(1)
     return None
+
+
+def _product_name(text: str) -> str | None:
+    match = _product_match(text)
+    return match[0] if match else None
+
+
+def _reporter_present(folded: str) -> bool:
+    reporter_roles = (
+        "doctor", "physician", "nurse", "caregiver", "pharmacist", "clinician", "clinicians",
+        "reporter", "reported", "reporting", "self-reported", "médico", "medico", "enfermera",
+        "farmacéutico", "pharmacien", "médecin",
+    )
+    if any(_fold(term) in folded for term in reporter_roles):
+        return True
+    return bool(re.search(r"\b(?:patient|paciente)\s+(?:reports?|reported|reporting)\b", folded))
 
 
 def classify(text: str) -> list[Classification]:
@@ -85,7 +118,7 @@ def classify(text: str) -> list[Classification]:
     labels: list[Classification] = []
 
     patient_present = bool(re.search(r"\b(?:patient|paciente|male|female|mujer|hombre|woman|man|\d{1,3}\s*[- ]?year[- ]?old|age\s*[:\-]?\s*\d{1,3})\b", folded))
-    reporter_present = any(_fold(term) in folded for term in REPORTER_TERMS)
+    reporter_present = _reporter_present(folded)
     product_present = _product_name(normalized) is not None
     reaction_hits = _nonnegated_terms(normalized, REACTION_TERMS)
 
@@ -158,14 +191,11 @@ def _term(pages: list[str], terms: tuple[str, ...], *, value_map: dict[str, str]
 
 
 def _product(pages: list[str]) -> Located | None:
-    patterns = (
-        r"\b(?:Product|Drug|Medicine|Medication|Producto|Produit)\s*[:\-]?\s*([A-Z][A-Za-z0-9\-]{2,})\b",
-        r"\b([A-Z][A-Za-z0-9\-]{2,})\s+\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b",
-    )
-    for pattern in patterns:
-        found = _regex(pages, pattern)
-        if found:
-            return found
+    for page_number, text in enumerate(pages, start=1):
+        match = _product_match(text)
+        if match:
+            value, start, end = match
+            return Located(value, page_number, _context(text, start, end))
     return None
 
 
@@ -197,7 +227,6 @@ def _narrative(pages: list[str]) -> Located | None:
             if not reaction_found:
                 continue
 
-            # Include one immediately preceding sentence when it carries patient/product/reporter context.
             selected = sentence
             start = sentence_match.start()
             if index > 0:

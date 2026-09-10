@@ -39,6 +39,54 @@ jobs:
       - run: npm run build
       - run: npm test -- --no-progress
 
+  assignment-evidence:
+    needs: [ai-service]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            ai-service/requirements.txt
+            samples/requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r ai-service/requirements.txt -r samples/requirements.txt
+      - name: Generate deterministic synthetic corpus
+        run: python samples/scripts/generate_corpus.py
+      - name: Process assignment batch and record timings
+        run: |
+          mkdir -p artifacts
+          cd ai-service
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 > ../artifacts/ai-service-batch.log 2>&1 &
+          ai_pid=$!
+          trap 'kill "$ai_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$ai_pid" 2>/dev/null; then
+              cat ../artifacts/ai-service-batch.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/health >/dev/null
+          cd ..
+          python samples/scripts/run_batch.py --url http://127.0.0.1:8000 --out samples/outputs --require-exact
+      - name: Upload measured sample outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assignment-sample-outputs
+          path: |
+            samples/outputs
+            artifacts/ai-service-batch.log
+          if-no-files-found: warn
+          retention-days: 14
+
   stack-smoke:
     needs: [ai-service, backend, frontend]
     runs-on: ubuntu-latest
@@ -47,3 +95,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: End-to-end Docker Compose smoke
         run: bash scripts/run_compose_smoke.sh
+      - name: Upload full-stack evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-stack-evidence
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 14
