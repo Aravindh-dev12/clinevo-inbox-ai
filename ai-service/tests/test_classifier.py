@@ -31,13 +31,46 @@ def test_pqc_only():
     assert categories("Product Dermacline batch LOT-Q100 has a broken seal and wrong color. No patient used it.") == {"PQC"}
 
 
+def test_pqc_detects_natural_broken_seal_word_order():
+    assert categories("Product Dermacline gel batch LOT-A17. The tube seal was broken before first use. No patient used it.") == {"PQC"}
+
+
 def test_mi_only():
     assert categories("Can Clinevex 10 mg be taken with food? No adverse event or defect was reported.") == {"MI"}
+
+
+def test_longer_negated_quality_phrase_does_not_turn_mi_into_pqc():
+    text = "Product Clinevex 10 mg. Can it be taken with food? No adverse event or product defect was reported."
+    assert categories(text) == {"MI"}
 
 
 def test_multilabel_icsr_and_pqc():
     text = "Patient P8 used Product Novera 20 mg. Patient reported swelling. The syringe was cracked and leaking."
     assert categories(text) == {"ICSR", "PQC"}
+
+
+def test_device_product_without_dose_supports_multilabel_case():
+    text = (
+        "A 40-year-old woman used a Novera autoinjector from lot AUTO-44. "
+        "The needle shield was visibly damaged. She experienced swelling. "
+        "A pharmacist in Singapore reported the case."
+    )
+    assert categories(text) == {"ICSR", "PQC"}
+
+
+def test_first_named_product_dose_supports_article_icsr():
+    text = (
+        "Patient A4, a 22-year-old man, developed nausea two hours after the first Clinevex dose. "
+        "The case was reported by clinicians in Spain."
+    )
+    assert categories(text) == {"ICSR"}
+
+
+def test_product_extraction_skips_quality_heading():
+    facts = extract_facts([
+        "Synthetic Product Quality Complaint. Product Dermacline topical gel, batch LOT-A17. The seal was broken."
+    ], "pqc.pdf")
+    assert facts["product"]["name"].value == "Dermacline"
 
 
 def test_spanish_synthetic_case_has_icsr_fallback():
