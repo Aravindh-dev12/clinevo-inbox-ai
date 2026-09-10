@@ -12,6 +12,18 @@ PQC_TERMS = (
     "damaged packaging", "damaged", "counterfeit", "cracked", "leaking", "leaked", "defect", "defective",
     "would not click", "sello roto", "color incorrecto", "emballage endommagé", "fissuré",
 )
+PQC_PATTERNS = (
+    (
+        r"\b(?:tablets?|capsules?|gel|solution|syringe|injector|autoinjector|pen|product|device)\b.{0,100}"
+        r"\b(?:blue|white|red|yellow|green|black|brown|clear|cloudy)\b.{0,40}\binstead of\b.{0,40}"
+        r"\b(?:usual|expected|normal)\b",
+        "unexpected product color",
+    ),
+    (
+        r"\b(?:wrong|unexpected|unusual|different)\s+(?:product\s+)?(?:color|colour)\b",
+        "unexpected product color",
+    ),
+)
 REACTION_TERMS = (
     "anaphylaxis", "life-threatening", "hospitalized", "hospitalised", "hospitalization",
     "rash", "nausea", "vomiting", "dizziness", "headache", "swelling", "redness", "itching",
@@ -86,6 +98,17 @@ def _nonnegated_terms(text: str, terms: tuple[str, ...]) -> list[str]:
     return hits
 
 
+def _nonnegated_quality_patterns(text: str) -> list[str]:
+    folded = _fold(text)
+    hits: list[str] = []
+    for pattern, label in PQC_PATTERNS:
+        for match in re.finditer(pattern, folded, re.I):
+            if not _is_negated(folded, match.start()):
+                hits.append(label)
+                break
+    return hits
+
+
 def _product_match(text: str) -> tuple[str, int, int] | None:
     for pattern in _PRODUCT_PATTERNS:
         for match in re.finditer(pattern, text, re.I):
@@ -129,7 +152,7 @@ def classify(text: str) -> list[Classification]:
             reason="Specific patient, reporter, product and non-negated adverse outcome indicators are present.",
         ))
 
-    pqc_hits = _nonnegated_terms(normalized, PQC_TERMS)
+    pqc_hits = _nonnegated_terms(normalized, PQC_TERMS) + _nonnegated_quality_patterns(normalized)
     if pqc_hits:
         labels.append(Classification(
             category="PQC",
@@ -187,6 +210,17 @@ def _term(pages: list[str], terms: tuple[str, ...], *, value_map: dict[str, str]
                     continue
                 value = value_map.get(term, term) if value_map else term
                 return Located(value, page_number, _context(text, match.start(), match.end()))
+    return None
+
+
+def _quality_pattern(pages: list[str]) -> Located | None:
+    for page_number, text in enumerate(pages, start=1):
+        folded = _fold(text)
+        for pattern, label in PQC_PATTERNS:
+            for match in re.finditer(pattern, folded, re.I):
+                if _is_negated(folded, match.start()):
+                    continue
+                return Located(label, page_number, _context(text, match.start(), match.end()))
     return None
 
 
@@ -262,7 +296,7 @@ def extract_facts(pages: list[str], source_name: str) -> dict[str, dict[str, Ext
     outcome = _term(pages, ("recovered", "resolved", "recovering", "fatal", "unknown"))
     seriousness = _term(pages, ("death", "life-threatening", "hospitalized", "hospitalised", "hospitalization"))
     narrative = _narrative(pages)
-    pqc_issue = _term(pages, PQC_TERMS)
+    pqc_issue = _term(pages, PQC_TERMS) or _quality_pattern(pages)
     photo = _term(pages, ("photo", "image", "photograph"), value_map={"photo":"yes","image":"yes","photograph":"yes"})
     question = _question(pages)
 
