@@ -76,9 +76,11 @@ public class ReviewQueueService {
                 SELECT MESSAGE_ID, CATEGORY, CONFIDENCE, REASON
                 FROM CLASSIFICATION
                 ORDER BY MESSAGE_ID, CONFIDENCE DESC, ID
-                """, rs -> result.computeIfAbsent(rs.getLong("MESSAGE_ID"), ignored -> new ArrayList<>())
-                .add(new InboxQueueItem.QueueClassification(
-                        rs.getString("CATEGORY"), rs.getBigDecimal("CONFIDENCE"), rs.getString("REASON"))));
+                """, rs -> {
+            result.computeIfAbsent(rs.getLong("MESSAGE_ID"), ignored -> new ArrayList<>())
+                    .add(new InboxQueueItem.QueueClassification(
+                            rs.getString("CATEGORY"), rs.getBigDecimal("CONFIDENCE"), rs.getString("REASON")));
+        });
         result.replaceAll((ignored, values) -> List.copyOf(values));
         return result;
     }
