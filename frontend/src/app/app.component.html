@@ -3,7 +3,7 @@
     <div>
       <div class="eyebrow">CLINEVO TECHNOLOGIES · CANDIDATE PROTOTYPE</div>
       <h1>Smart Inbox Review</h1>
-      <p>AI-assisted triage with human confirmation and source-level provenance.</p>
+      <p>Risk-aware AI triage with human confirmation, uncertainty signals and source-level provenance.</p>
     </div>
     <button class="secondary" (click)="refresh()">Refresh queue</button>
   </header>
@@ -14,13 +14,26 @@
   <main class="workspace">
     <aside class="queue">
       <div class="panel-heading">
-        <h2>Incoming queue</h2>
+        <div><h2>Incoming queue</h2><small class="muted">Priority = reviewer attention, not clinical seriousness</small></div>
         <span>{{ items.length }} items</span>
       </div>
       <div class="empty" *ngIf="!loading && items.length === 0">No inbox items yet.</div>
       <button class="queue-item" *ngFor="let item of items" [class.active]="item.id === selectedId" (click)="open(item.id)">
-        <div class="queue-title">{{ item.subject || '(no subject)' }}</div>
+        <div class="queue-title-row">
+          <div class="queue-title">{{ item.subject || '(no subject)' }}</div>
+          <span class="priority" [class.priority-high]="item.reviewPriorityBand === 'HIGH'" [class.priority-attention]="item.reviewPriorityBand === 'ATTENTION'">
+            {{ item.reviewPriorityBand }} · {{ item.reviewPriorityScore }}
+          </span>
+        </div>
         <div class="queue-meta">{{ item.sender }}</div>
+        <div class="queue-classifications" *ngIf="item.classifications.length">
+          <span class="queue-chip" *ngFor="let c of item.classifications">{{ c.category === 'NOT_RELEVANT' ? 'Not Relevant' : c.category }} {{ confidence(c.confidence) }}</span>
+        </div>
+        <p class="queue-summary">{{ queueSummary(item.aiSummary) }}</p>
+        <div class="queue-intelligence">
+          <span *ngIf="item.evidenceCoverage != null">Evidence {{ confidence(item.evidenceCoverage) }}</span>
+          <span *ngIf="item.attentionReasons.length">{{ item.attentionReasons[0] }}</span>
+        </div>
         <div class="queue-footer">
           <span class="status">{{ item.status }}</span>
           <span>{{ item.receivedAt | date:'short' }}</span>
@@ -128,10 +141,7 @@
           <fieldset>
             <legend>Override classifications (multi-label)</legend>
             <label *ngFor="let category of classificationOptions">
-              <input
-                type="checkbox"
-                [checked]="isOverrideCategorySelected(category)"
-                (change)="toggleOverrideCategory(category, $any($event.target).checked)" />
+              <input type="checkbox" [checked]="isOverrideCategorySelected(category)" (change)="toggleOverrideCategory(category, $any($event.target).checked)" />
               {{ category === 'NOT_RELEVANT' ? 'Not Relevant' : category }}
             </label>
             <small>Not Relevant is mutually exclusive with ICSR, PQC, and MI.</small>

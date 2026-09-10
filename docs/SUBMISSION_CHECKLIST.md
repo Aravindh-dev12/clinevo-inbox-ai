@@ -19,28 +19,32 @@
 - [x] Human accept/override workflow
 - [x] Timestamped audit history
 - [x] Synthetic corpus generator
+- [x] Synthetic corpus includes 15 email fixtures, 5 digital PDFs, 2 scanned PDFs, 5 article PDFs, 2 non-English PDFs, multiple PQC-only/MI-only examples, and irrelevant examples
 - [x] Batch JSON + timing runner
+- [x] CI exact-match checks all 15 synthetic email fixtures through `/process-text`
 - [x] Optional literature screening extension
 - [x] CI for AI/backend/frontend
 - [x] README with local setup and environment placeholders
 - [x] Architecture diagram
 - [x] 2–5 page equivalent technical write-up
 - [x] Prompting/confidence/data-handling/limitations documented
-- [ ] Run `samples/scripts/run_batch.py` on the final demonstration machine and include generated `samples/outputs/`
-- [ ] Capture final UI screenshots or a short screen recording from the running build
+- [x] CI generates measured per-document JSON/CSV evidence and bundles it with full-stack evidence after all gates pass
+- [x] CI verifies Angular bootstraps in a real headless browser before accepting a review-screen screenshot
+- [ ] Run `samples/scripts/run_batch.py` once on the final demonstration machine and retain that machine's generated `samples/outputs/`
+- [ ] Capture a final local screenshot set or short recording during the live-demo rehearsal (CI evidence is a fallback, not a substitute for rehearsal)
 
 ## Screenshot / recording shot list
 
 Capture from the actual running application; do not use mockups.
 
-1. Inbox queue with several synthetic messages and statuses.
+1. Risk-aware inbox queue showing several synthetic messages, classifications, confidence, summary preview, evidence coverage and attention priority.
 2. ICSR message showing classifications, confidence and summary.
 3. Extracted safety fields with PDF page/evidence provenance.
 4. PQC-only or MI-only message showing correct category separation.
 5. Reviewer override and audit trail with timestamp.
 6. Scanned/handwritten example showing OCR confidence.
 7. Literature screening page showing multiple cases from an article.
-8. `samples/outputs/batch_report.csv` or `summary.json` showing measured processing times.
+8. `samples/outputs/batch_report.csv`, `summary.json`, or the synthetic-email classification report showing measured acceptance evidence.
 9. Optional: terminal with healthy Docker Compose services.
 
 ## Final repository checks
@@ -59,6 +63,19 @@ docker compose up --build
 ```
 
 Verify that `.env` is ignored and that API/mailbox/model credentials are placeholders only.
+
+## Automated evidence package
+
+A green CI run publishes `clinevo-assignment-submission-package`, containing:
+
+- exact-match evidence for all 15 synthetic email fixtures
+- generated JSON for every batch PDF
+- `batch_report.csv` and `summary.json`
+- browser-rendered Angular review screenshot and rendered DOM proof
+- integrated Docker Compose status
+- README, architecture, technical write-up, testing notes, demo walkthrough and future-ready ideas
+
+This makes the submission reproducible, but the final live-demo rehearsal should still be performed on the machine that will be used during the interview.
 
 ## Suggested submission package
 
