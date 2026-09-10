@@ -35,13 +35,14 @@ COUNTRIES = (
 )
 _PRODUCT_STOPWORDS = {
     "quality", "complaint", "information", "request", "safety", "report", "case", "device", "adverse",
+    "name", "was", "were", "not", "provided", "unknown", "unspecified", "missing", "suspect",
 }
 _PRODUCT_PATTERNS = (
     r"\b(?:product|drug|medicine|medication|producto|produit)\s*[:\-]?\s*([A-Za-z][A-Za-z0-9\-]{2,})\b",
     r"\b([A-Za-z][A-Za-z0-9\-]{2,})\s+\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b",
     r"\b([A-Za-z][A-Za-z0-9\-]{2,})\s+(?:tablets?|capsules?|gel|syringe|injector|autoinjector|pen)\b",
     r"\b(?:first|next|last)\s+([A-Za-z][A-Za-z0-9\-]{2,})\s+dose\b",
-    r"\b(?:started|received|took|taking|used|using)\s+(?:a|an|the\s+)?([A-Za-z][A-Za-z0-9\-]{2,})\b",
+    r"\b(?:started|received|took|taking|used|using)\s+(?:(?:a|an|the)\s+)?([A-Za-z][A-Za-z0-9\-]{2,})\b",
 )
 
 
