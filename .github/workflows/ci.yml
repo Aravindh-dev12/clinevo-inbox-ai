@@ -75,7 +75,7 @@ jobs:
           done
           curl -fsS http://127.0.0.1:8000/health >/dev/null
           cd ..
-          python samples/scripts/run_batch.py --url http://127.0.0.1:8000 --out samples/outputs
+          python samples/scripts/run_batch.py --url http://127.0.0.1:8000 --out samples/outputs --require-exact
       - name: Upload measured sample outputs
         if: always()
         uses: actions/upload-artifact@v4
