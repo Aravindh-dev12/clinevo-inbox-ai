@@ -35,6 +35,25 @@ def test_pqc_detects_natural_broken_seal_word_order():
     assert categories("Product Dermacline gel batch LOT-A17. The tube seal was broken before first use. No patient used it.") == {"PQC"}
 
 
+def test_pqc_detects_relative_product_color_anomaly_with_provenance():
+    text = (
+        "The tablets in Clinevex lot TAB-14 are blue instead of the usual white. "
+        "I have not taken any tablets and have no symptoms."
+    )
+    assert categories(text) == {"PQC"}
+    facts = extract_facts([text], "email-014")
+    issue = facts["quality_complaint"]["issue"]
+    assert issue.value == "unexpected product color"
+    assert issue.source is not None
+    assert issue.source.page == 1
+    assert "blue instead of the usual white" in issue.source.evidence.lower()
+
+
+def test_relative_timing_question_is_not_misclassified_as_color_pqc():
+    text = "Can Clinevex 10 mg be taken at noon instead of the usual morning time? No adverse event or defect was reported."
+    assert categories(text) == {"MI"}
+
+
 def test_mi_only():
     assert categories("Can Clinevex 10 mg be taken with food? No adverse event or defect was reported.") == {"MI"}
 
