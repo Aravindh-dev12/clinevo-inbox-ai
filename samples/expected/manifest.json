@@ -4,7 +4,7 @@
   {"file":"digital_pqc_01.pdf","kind":"digital","expected":["PQC"],"email_text":"Product complaint only; no patient event."},
   {"file":"digital_mi_01.pdf","kind":"digital","expected":["MI"],"email_text":"Medical information question attached."},
   {"file":"digital_combo_01.pdf","kind":"digital","expected":["ICSR","PQC"],"email_text":"Defective device with a patient reaction."},
-  {"file":"scanned_icsr_01.pdf","kind":"scanned","expected":["ICSR"],"email_text":"Scanned handwritten-style mock safety form."},
+  {"file":"scanned_icsr_01.pdf","kind":"scanned","expected":["ICSR"],"email_text":"Scanned handwritten-style mock safety form. Reporter is a nurse in Australia."},
   {"file":"scanned_pqc_01.pdf","kind":"scanned","expected":["PQC"],"email_text":"Scanned mock quality complaint."},
   {"file":"article_case_01.pdf","kind":"article","expected":["ICSR"],"email_text":"Published fictional article for literature screening."},
   {"file":"article_case_02.pdf","kind":"article","expected":["ICSR"],"email_text":"Published fictional article for literature screening."},
