@@ -19,7 +19,9 @@
 - [x] Human accept/override workflow
 - [x] Timestamped audit history
 - [x] Synthetic corpus generator
+- [x] Synthetic corpus includes 15 email fixtures, 5 digital PDFs, 2 scanned PDFs, 5 article PDFs, 2 non-English PDFs, multiple PQC-only/MI-only examples, and irrelevant examples
 - [x] Batch JSON + timing runner
+- [x] CI exact-match checks all 15 synthetic email fixtures through `/process-text`
 - [x] Optional literature screening extension
 - [x] CI for AI/backend/frontend
 - [x] README with local setup and environment placeholders
@@ -42,7 +44,7 @@ Capture from the actual running application; do not use mockups.
 5. Reviewer override and audit trail with timestamp.
 6. Scanned/handwritten example showing OCR confidence.
 7. Literature screening page showing multiple cases from an article.
-8. `samples/outputs/batch_report.csv` or `summary.json` showing measured processing times.
+8. `samples/outputs/batch_report.csv`, `summary.json`, or the synthetic-email classification report showing measured acceptance evidence.
 9. Optional: terminal with healthy Docker Compose services.
 
 ## Final repository checks
@@ -66,6 +68,7 @@ Verify that `.env` is ignored and that API/mailbox/model credentials are placeho
 
 A green CI run publishes `clinevo-assignment-submission-package`, containing:
 
+- exact-match evidence for all 15 synthetic email fixtures
 - generated JSON for every batch PDF
 - `batch_report.csv` and `summary.json`
 - browser-rendered Angular review screenshot and rendered DOM proof
