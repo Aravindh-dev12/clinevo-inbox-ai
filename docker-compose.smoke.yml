@@ -19,8 +19,11 @@ services:
     environment:
       MAIL_HOST: greenmail
       MAIL_PORT: "3143"
-      MAIL_USERNAME: ci
-      MAIL_PASSWORD: ci
+      # GreenMail auto-creates the recipient account on SMTP delivery with the
+      # full address as both login and password. Keep the IMAP poller aligned
+      # with that deterministic smoke account.
+      MAIL_USERNAME: ci@localhost
+      MAIL_PASSWORD: ci@localhost
       MAIL_FOLDER: INBOX
       MAIL_SSL: "false"
       MAIL_POLL_SECONDS: "2"
