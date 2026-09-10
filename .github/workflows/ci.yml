@@ -79,6 +79,7 @@ jobs:
           done
           curl -fsS http://127.0.0.1:8000/health >/dev/null
           cd ..
+          python samples/scripts/run_email_fixtures.py --url http://127.0.0.1:8000 --out samples/outputs --require-exact
           python samples/scripts/run_batch.py --url http://127.0.0.1:8000 --out samples/outputs --require-exact
       - name: Upload measured sample outputs
         if: always()
@@ -125,6 +126,8 @@ jobs:
         run: |
           test -f submission/assignment-evidence/samples/outputs/summary.json
           test -f submission/assignment-evidence/samples/outputs/batch_report.csv
+          test -f submission/assignment-evidence/samples/outputs/email_classification_report.json
+          test -f submission/assignment-evidence/samples/outputs/email_classification_report.csv
           test -f submission/full-stack-evidence/ui/review-workbench.png
           mkdir -p submission/documentation
           cp README.md submission/documentation/
@@ -135,13 +138,14 @@ jobs:
           - Commit: ${GITHUB_SHA}
           - Synthetic data only
           - Service/unit/build checks: passed before this packaging job
-          - Assignment batch: see \`assignment-evidence/samples/outputs/\`
-          - Measured timings: \`assignment-evidence/samples/outputs/batch_report.csv\`
+          - 15 synthetic email acceptance fixtures: \`assignment-evidence/samples/outputs/email_classification_report.json\`
+          - Assignment PDF batch: see \`assignment-evidence/samples/outputs/\`
+          - Measured PDF timings: \`assignment-evidence/samples/outputs/batch_report.csv\`
           - Browser-rendered UI evidence: \`full-stack-evidence/ui/review-workbench.png\`
           - Integrated stack status: \`full-stack-evidence/compose-status.json\` (or text fallback)
           - Architecture/write-up/testing/walkthrough: \`documentation/\`
 
-          This artifact is evidence for the candidate prototype. It is not a validated pharmacovigilance production release.
+          Exact fixture matches are synthetic acceptance evidence, not clinical validation. This artifact is evidence for the candidate prototype; it is not a validated pharmacovigilance production release.
           EOF
           find submission -maxdepth 4 -type f -print | sort
       - name: Upload complete submission package
