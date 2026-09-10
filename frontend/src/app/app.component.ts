@@ -3,7 +3,7 @@ import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
 import { LiteratureScreeningComponent } from './literature-screening.component';
-import { Classification, FactOverride, InboxDetail, InboxMessage } from './models';
+import { Classification, FactOverride, InboxDetail, InboxQueueItem } from './models';
 
 @Component({
   selector: 'app-root',
@@ -12,7 +12,7 @@ import { Classification, FactOverride, InboxDetail, InboxMessage } from './model
   templateUrl: './app.component.html'
 })
 export class AppComponent implements OnInit {
-  items: InboxMessage[] = [];
+  items: InboxQueueItem[] = [];
   selected?: InboxDetail;
   selectedId?: number;
   loading = false;
@@ -33,7 +33,10 @@ export class AppComponent implements OnInit {
     this.loading = true;
     this.api.listInbox().subscribe({
       next: items => {
-        this.items = [...items].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+        this.items = [...items].sort((a, b) => {
+          const priority = (b.reviewPriorityScore ?? 0) - (a.reviewPriorityScore ?? 0);
+          return priority !== 0 ? priority : b.receivedAt.localeCompare(a.receivedAt);
+        });
         this.loading = false;
         if (!this.selectedId && this.items.length > 0) this.open(this.items[0].id);
       },
@@ -61,6 +64,12 @@ export class AppComponent implements OnInit {
 
   confidence(value?: number): string {
     return value == null ? '—' : `${Math.round(value * 100)}%`;
+  }
+
+  queueSummary(value?: string): string {
+    if (!value) return 'Summary pending.';
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    return normalized.length <= 150 ? normalized : `${normalized.slice(0, 147)}…`;
   }
 
   sourceLabel(page?: number, name?: string): string {

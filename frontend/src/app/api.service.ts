@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { InboxDetail, InboxMessage, LiteratureBatchResult, ReviewRequest } from './models';
+import { InboxDetail, InboxMessage, InboxQueueItem, LiteratureBatchResult, ReviewRequest } from './models';
 
 declare global { interface Window { __CLINEVO_CONFIG__?: { apiBaseUrl?: string; apiKey?: string }; } }
 
@@ -9,7 +9,7 @@ declare global { interface Window { __CLINEVO_CONFIG__?: { apiBaseUrl?: string; 
 export class ApiService {
   private readonly baseUrl = window.__CLINEVO_CONFIG__?.apiBaseUrl ?? '/api';
   constructor(private readonly http: HttpClient) {}
-  listInbox(): Observable<InboxMessage[]> { return this.http.get<InboxMessage[]>(`${this.baseUrl}/inbox`); }
+  listInbox(): Observable<InboxQueueItem[]> { return this.http.get<InboxQueueItem[]>(`${this.baseUrl}/inbox`); }
   getDetail(id: number): Observable<InboxDetail> { return this.http.get<InboxDetail>(`${this.baseUrl}/inbox/${id}/detail`); }
   attachmentUrl(messageId: number, attachmentId: number): string { return `${this.baseUrl}/inbox/${messageId}/attachments/${attachmentId}`; }
   review(id: number, request: ReviewRequest): Observable<InboxMessage> {

@@ -16,6 +16,14 @@ export interface Classification {
   reason: string;
 }
 
+export interface InboxQueueItem extends InboxMessage {
+  classifications: Classification[];
+  reviewPriorityScore: number;
+  reviewPriorityBand: 'HIGH' | 'ATTENTION' | 'ROUTINE';
+  attentionReasons: string[];
+  evidenceCoverage?: number;
+}
+
 export interface TranslationPage {
   page: number;
   original_text: string;

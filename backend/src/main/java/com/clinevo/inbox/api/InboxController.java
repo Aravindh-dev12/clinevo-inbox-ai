@@ -2,6 +2,7 @@ package com.clinevo.inbox.api;
 
 import com.clinevo.inbox.domain.InboxMessage;
 import com.clinevo.inbox.service.InboxService;
+import com.clinevo.inbox.service.ReviewQueueService;
 import com.clinevo.inbox.service.ReviewViewService;
 import jakarta.validation.Valid;
 import org.springframework.http.ContentDisposition;
@@ -19,16 +20,18 @@ import java.util.Map;
 public class InboxController {
     private final InboxService inboxService;
     private final ReviewViewService reviewViewService;
+    private final ReviewQueueService reviewQueueService;
 
-    public InboxController(InboxService inboxService, ReviewViewService reviewViewService) {
+    public InboxController(InboxService inboxService, ReviewViewService reviewViewService, ReviewQueueService reviewQueueService) {
         this.inboxService = inboxService;
         this.reviewViewService = reviewViewService;
+        this.reviewQueueService = reviewQueueService;
     }
 
     @GetMapping("/health")
     public Map<String, String> health() { return Map.of("status", "ok", "service", "clinevo-inbox-api"); }
 
-    @GetMapping("/inbox") public List<InboxMessage> list() { return inboxService.list(); }
+    @GetMapping("/inbox") public List<InboxQueueItem> list() { return reviewQueueService.list(); }
     @GetMapping("/inbox/{id}") public InboxMessage get(@PathVariable long id) { return inboxService.get(id); }
     @GetMapping("/inbox/{id}/detail") public InboxDetailView detail(@PathVariable long id) { return reviewViewService.detail(id); }
 
