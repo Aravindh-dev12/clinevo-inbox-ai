@@ -21,12 +21,24 @@
             "styles": ["src/styles.css"]
           },
           "configurations": {
-            "production": {
-              "budgets": [
-                {"type": "initial", "maximumWarning": "800kB", "maximumError": "1.5MB"}
-              ],
-              "outputHashing": "all"
-            }
+"production": {
+  "optimization": {
+    "scripts": true,
+    "styles": {
+      "minify": true,
+      "inlineCritical": false
+    },
+    "fonts": true
+  },
+  "budgets": [
+    {
+      "type": "initial",
+      "maximumWarning": "800kB",
+      "maximumError": "1.5MB"
+    }
+  ],
+  "outputHashing": "all"
+}
           }
         },
         "serve": {
